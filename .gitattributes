@@ -1,0 +1,2 @@
+# Builds run under Linux/WSL, where CRLF breaks Makefile recipes and scripts.
+* text=auto eol=lf
