@@ -53,3 +53,15 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Build output, editor files and local tooling
+build/
+.venv/
+.idea/
+compile_commands.json
+__pycache__/
+.pytest_cache/
+
+# Database files created by tests and manual runs
+*.db
+*.db.wal
