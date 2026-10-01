@@ -1,14 +1,17 @@
 /*
  * Entry point for btree_db: a read-eval-print loop over stdin.
  *
- * Lines starting with '.' are meta commands handled here; everything else will
- * become a SQL statement once the parser exists.
+ * Lines starting with '.' are meta commands handled here; everything else is
+ * prepared into a Statement by the parser and run by the executor.
  */
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+
+#include "executor.h"
+#include "parser.h"
 
 #define PROMPT "db > "
 
@@ -49,8 +52,49 @@ static MetaCommandResult do_meta_command(const InputBuffer *input) {
     return META_COMMAND_UNRECOGNIZED;
 }
 
+/* Each failure gets its own message so tests (and users) can tell exactly
+ * which rule an input broke. */
+static void report_prepare_error(PrepareResult result, const char *input) {
+    switch (result) {
+    case PREPARE_SYNTAX_ERROR:
+        printf("Syntax error. Could not parse statement.\n");
+        break;
+    case PREPARE_INVALID_ID:
+        printf("ID must be an integer between 0 and %u.\n", UINT32_MAX);
+        break;
+    case PREPARE_STRING_TOO_LONG:
+        printf("String is too long.\n");
+        break;
+    case PREPARE_UNRECOGNIZED_STATEMENT:
+        printf("Unrecognized keyword at start of '%s'.\n", input);
+        break;
+    case PREPARE_SUCCESS:
+        break;
+    }
+}
+
+static void run_statement(InputBuffer *input, Table *table) {
+    /* prepare_statement tokenizes in place, so keep a copy for error messages. */
+    char *original = strdup(input->buffer);
+    if (original == NULL) {
+        perror("strdup");
+        exit(EXIT_FAILURE);
+    }
+    Statement statement;
+    PrepareResult prepared = prepare_statement(input->buffer, &statement);
+    if (prepared != PREPARE_SUCCESS) {
+        report_prepare_error(prepared, original);
+    } else if (execute_statement(&statement, table) == EXECUTE_TABLE_FULL) {
+        printf("Error: Table full.\n");
+    } else {
+        printf("Executed.\n");
+    }
+    free(original);
+}
+
 int main(void) {
     InputBuffer input = {0};
+    Table *table = table_new();
 
     for (;;) {
         print_prompt();
@@ -67,9 +111,10 @@ int main(void) {
             printf("Unrecognized command '%s'.\n", input.buffer);
             continue;
         }
-        printf("Unrecognized keyword at start of '%s'.\n", input.buffer);
+        run_statement(&input, table);
     }
 
+    table_free(table);
     free(input.buffer);
     return EXIT_SUCCESS;
 }
