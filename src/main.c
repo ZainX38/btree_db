@@ -92,9 +92,13 @@ static void run_statement(InputBuffer *input, Table *table) {
     free(original);
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <database file>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
     InputBuffer input = {0};
-    Table *table = table_new();
+    Table *table = db_open(argv[1]);
 
     for (;;) {
         print_prompt();
@@ -114,7 +118,7 @@ int main(void) {
         run_statement(&input, table);
     }
 
-    table_free(table);
+    db_close(table);
     free(input.buffer);
     return EXIT_SUCCESS;
 }
