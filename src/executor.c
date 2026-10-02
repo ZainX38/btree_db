@@ -3,35 +3,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-Table *table_new(void) {
+Table *db_open(const char *filename) {
     Table *table = calloc(1, sizeof(Table));
     if (table == NULL) {
         perror("calloc");
         exit(EXIT_FAILURE);
     }
+    table->pager = pager_open(filename);
+    /* The row count isn't stored anywhere yet, so every session starts empty
+     * and writes over what the last one left. */
+    table->num_rows = 0;
     return table;
 }
 
-void table_free(Table *table) {
-    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++) {
-        free(table->pages[i]);
+void db_close(Table *table) {
+    Pager *pager = table->pager;
+    for (uint32_t i = 0; i < pager->num_pages; i++) {
+        pager_flush(pager, i, PAGE_SIZE);
     }
+    pager_close(pager);
     free(table);
 }
 
-/* Returns where row number `row_num` lives in memory, allocating its page on
- * first touch. */
+/* Returns where row number `row_num` lives inside its cached page. */
 static void *row_slot(Table *table, uint32_t row_num) {
     uint32_t page_num = row_num / ROWS_PER_PAGE;
-    if (table->pages[page_num] == NULL) {
-        table->pages[page_num] = calloc(1, PAGE_SIZE);
-        if (table->pages[page_num] == NULL) {
-            perror("calloc");
-            exit(EXIT_FAILURE);
-        }
-    }
+    void *page = pager_get_page(table->pager, page_num);
     uint32_t byte_offset = (row_num % ROWS_PER_PAGE) * ROW_SIZE;
-    return (char *)table->pages[page_num] + byte_offset;
+    return (char *)page + byte_offset;
 }
 
 static ExecuteResult execute_insert(const Statement *statement, Table *table) {
