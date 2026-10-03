@@ -3,6 +3,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* There is no header storing the row count, so it is worked out from the file
+ * length: full pages hold ROWS_PER_PAGE rows each and only the last page may
+ * be partial. This goes away once the B+tree stores counts in its nodes. */
+static uint32_t rows_in_file(uint32_t file_length) {
+    uint32_t full_pages = file_length / PAGE_SIZE;
+    uint32_t tail_bytes = file_length % PAGE_SIZE;
+    if (tail_bytes % ROW_SIZE != 0) {
+        fprintf(stderr, "Database file is corrupt: last page holds a partial row.\n");
+        exit(EXIT_FAILURE);
+    }
+    return full_pages * ROWS_PER_PAGE + tail_bytes / ROW_SIZE;
+}
+
 Table *db_open(const char *filename) {
     Table *table = calloc(1, sizeof(Table));
     if (table == NULL) {
@@ -10,16 +23,21 @@ Table *db_open(const char *filename) {
         exit(EXIT_FAILURE);
     }
     table->pager = pager_open(filename);
-    /* The row count isn't stored anywhere yet, so every session starts empty
-     * and writes over what the last one left. */
-    table->num_rows = 0;
+    table->num_rows = rows_in_file(table->pager->file_length);
     return table;
 }
 
 void db_close(Table *table) {
     Pager *pager = table->pager;
-    for (uint32_t i = 0; i < pager->num_pages; i++) {
+    uint32_t full_pages = table->num_rows / ROWS_PER_PAGE;
+    for (uint32_t i = 0; i < full_pages; i++) {
         pager_flush(pager, i, PAGE_SIZE);
+    }
+    /* Write the last page only up to its last row, so the file length still
+     * tells the next session how many rows there are. */
+    uint32_t extra_rows = table->num_rows % ROWS_PER_PAGE;
+    if (extra_rows > 0) {
+        pager_flush(pager, full_pages, extra_rows * ROW_SIZE);
     }
     pager_close(pager);
     free(table);
