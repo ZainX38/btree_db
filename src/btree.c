@@ -1,0 +1,118 @@
+#include "btree.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+_Static_assert(LEAF_NODE_HEADER_SIZE == 14, "leaf header layout must stay at 14 bytes");
+_Static_assert(LEAF_NODE_MAX_CELLS == 13, "a 4KB leaf holds 13 cells of 297 bytes");
+
+/* Byte-level helpers. memcpy compiles down to a plain load/store on x86, but
+ * unlike a pointer cast it is defined for unaligned offsets. */
+static uint32_t read_u32(const void *node, uint32_t offset) {
+    uint32_t value;
+    memcpy(&value, (const char *)node + offset, sizeof(value));
+    return value;
+}
+
+static void write_u32(void *node, uint32_t offset, uint32_t value) {
+    memcpy((char *)node + offset, &value, sizeof(value));
+}
+
+static uint8_t read_u8(const void *node, uint32_t offset) {
+    return ((const uint8_t *)node)[offset];
+}
+
+static void write_u8(void *node, uint32_t offset, uint8_t value) {
+    ((uint8_t *)node)[offset] = value;
+}
+
+static uint32_t leaf_node_cell_offset(uint32_t cell_num) {
+    return LEAF_NODE_HEADER_SIZE + cell_num * LEAF_NODE_CELL_SIZE;
+}
+
+NodeType get_node_type(const void *node) {
+    return (NodeType)read_u8(node, NODE_TYPE_OFFSET);
+}
+
+void set_node_type(void *node, NodeType type) {
+    write_u8(node, NODE_TYPE_OFFSET, (uint8_t)type);
+}
+
+bool is_node_root(const void *node) {
+    return read_u8(node, IS_ROOT_OFFSET) != 0;
+}
+
+void set_node_root(void *node, bool is_root) {
+    write_u8(node, IS_ROOT_OFFSET, is_root ? 1 : 0);
+}
+
+uint32_t leaf_node_num_cells(const void *node) {
+    return read_u32(node, LEAF_NODE_NUM_CELLS_OFFSET);
+}
+
+void set_leaf_node_num_cells(void *node, uint32_t num_cells) {
+    write_u32(node, LEAF_NODE_NUM_CELLS_OFFSET, num_cells);
+}
+
+uint32_t leaf_node_next_leaf(const void *node) {
+    return read_u32(node, LEAF_NODE_NEXT_LEAF_OFFSET);
+}
+
+void set_leaf_node_next_leaf(void *node, uint32_t next_leaf) {
+    write_u32(node, LEAF_NODE_NEXT_LEAF_OFFSET, next_leaf);
+}
+
+uint32_t leaf_node_key(const void *node, uint32_t cell_num) {
+    return read_u32(node, leaf_node_cell_offset(cell_num) + LEAF_NODE_KEY_OFFSET);
+}
+
+void set_leaf_node_key(void *node, uint32_t cell_num, uint32_t key) {
+    write_u32(node, leaf_node_cell_offset(cell_num) + LEAF_NODE_KEY_OFFSET, key);
+}
+
+void *leaf_node_value(void *node, uint32_t cell_num) {
+    return (char *)node + leaf_node_cell_offset(cell_num) + LEAF_NODE_VALUE_OFFSET;
+}
+
+void initialize_leaf_node(void *node) {
+    memset(node, 0, PAGE_SIZE);
+    set_node_type(node, NODE_LEAF);
+    set_node_root(node, false);
+    set_leaf_node_num_cells(node, 0);
+    set_leaf_node_next_leaf(node, NO_NEXT_LEAF);
+}
+
+void leaf_node_append(void *node, uint32_t key, const Row *value) {
+    uint32_t cell_num = leaf_node_num_cells(node);
+    set_leaf_node_key(node, cell_num, key);
+    serialize_row(value, leaf_node_value(node, cell_num));
+    set_leaf_node_num_cells(node, cell_num + 1);
+}
+
+Table *db_open(const char *filename) {
+    Table *table = calloc(1, sizeof(Table));
+    if (table == NULL) {
+        perror("calloc");
+        exit(EXIT_FAILURE);
+    }
+    table->pager = pager_open(filename);
+    table->root_page_num = ROOT_PAGE_NUM;
+
+    if (table->pager->num_pages == 0) {
+        /* Brand new file: page 0 becomes an empty leaf that is also the root. */
+        void *root = pager_get_page(table->pager, ROOT_PAGE_NUM);
+        initialize_leaf_node(root);
+        set_node_root(root, true);
+    }
+    return table;
+}
+
+void db_close(Table *table) {
+    Pager *pager = table->pager;
+    for (uint32_t i = 0; i < pager->num_pages; i++) {
+        pager_flush(pager, i);
+    }
+    pager_close(pager);
+    free(table);
+}

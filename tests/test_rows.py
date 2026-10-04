@@ -2,8 +2,8 @@ from conftest import PROMPT
 
 USERNAME_MAX_LEN = 32
 EMAIL_MAX_LEN = 255
-# 4096 // 293 rows per page, 100 pages in the table.
-TABLE_MAX_ROWS = 13 * 100
+# The tree is a single leaf until splits exist, so 13 rows fill the table.
+TABLE_MAX_ROWS = 13
 
 
 def test_insert_and_select(repl):
