@@ -24,8 +24,8 @@ typedef struct {
 
 Pager *pager_open(const char *filename);
 void *pager_get_page(Pager *pager, uint32_t page_num);
-/* Writes the first `size` bytes of a cached page to its slot in the file. */
-void pager_flush(Pager *pager, uint32_t page_num, uint32_t size);
+/* Writes a cached page back to its slot in the file. */
+void pager_flush(Pager *pager, uint32_t page_num);
 /* Frees every cached page and closes the file; does not flush. */
 void pager_close(Pager *pager);
 

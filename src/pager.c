@@ -42,6 +42,12 @@ Pager *pager_open(const char *filename) {
         fprintf(stderr, "Database file is larger than %u pages.\n", PAGER_MAX_PAGES);
         exit(EXIT_FAILURE);
     }
+    /* We only ever write whole pages, so anything else means a torn or
+     * foreign file. */
+    if (st.st_size % PAGE_SIZE != 0) {
+        fprintf(stderr, "Database file is corrupt: not a whole number of pages.\n");
+        exit(EXIT_FAILURE);
+    }
 
     Pager *pager = calloc(1, sizeof(Pager));
     if (pager == NULL) {
@@ -49,18 +55,18 @@ Pager *pager_open(const char *filename) {
     }
     pager->fd = fd;
     pager->file_length = (uint32_t)st.st_size;
-    /* Round up: a partly written last page still counts as a page. */
-    pager->num_pages = (pager->file_length + PAGE_SIZE - 1) / PAGE_SIZE;
+    pager->num_pages = pager->file_length / PAGE_SIZE;
     return pager;
 }
 
-/* Fills a fresh buffer from disk. A short read is fine (the last page may be
- * partial); calloc already zeroed whatever the file doesn't cover. */
+/* Fills a fresh buffer from disk. Pages past the end of the file have never
+ * been written, so they stay zeroed. */
 static void load_page(Pager *pager, uint32_t page_num, void *page) {
-    if (page_num >= (pager->file_length + PAGE_SIZE - 1) / PAGE_SIZE) {
-        return; /* page has never been written */
+    if (page_num >= pager->file_length / PAGE_SIZE) {
+        return;
     }
-    if (pread(pager->fd, page, PAGE_SIZE, page_offset(page_num)) < 0) {
+    ssize_t got = pread(pager->fd, page, PAGE_SIZE, page_offset(page_num));
+    if (got != (ssize_t)PAGE_SIZE) {
         die("pread");
     }
 }
@@ -81,13 +87,13 @@ void *pager_get_page(Pager *pager, uint32_t page_num) {
     return pager->pages[page_num];
 }
 
-void pager_flush(Pager *pager, uint32_t page_num, uint32_t size) {
+void pager_flush(Pager *pager, uint32_t page_num) {
     void *page = pager->pages[page_num];
     if (page == NULL) {
         return; /* never loaded, so the copy on disk is already current */
     }
-    ssize_t written = pwrite(pager->fd, page, size, page_offset(page_num));
-    if (written < 0 || (size_t)written != size) {
+    ssize_t written = pwrite(pager->fd, page, PAGE_SIZE, page_offset(page_num));
+    if (written != (ssize_t)PAGE_SIZE) {
         die("pwrite");
     }
 }

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/types.h>
 
+#include "btree.h"
 #include "executor.h"
 #include "parser.h"
 
