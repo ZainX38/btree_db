@@ -83,6 +83,27 @@ void initialize_leaf_node(void *node) {
     set_leaf_node_next_leaf(node, NO_NEXT_LEAF);
 }
 
+uint32_t leaf_node_find_cell(const void *node, uint32_t key) {
+    /* Search the half-open range [low, high). Invariant: every cell before
+     * `low` has a smaller key, every cell from `high` on has a key >= `key`. */
+    uint32_t low = 0;
+    uint32_t high = leaf_node_num_cells(node);
+    while (low < high) {
+        /* low + (high - low) / 2 can't overflow, unlike (low + high) / 2. */
+        uint32_t mid = low + (high - low) / 2;
+        uint32_t mid_key = leaf_node_key(node, mid);
+        if (mid_key == key) {
+            return mid;
+        }
+        if (mid_key < key) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
+}
+
 static void *leaf_node_cell(void *node, uint32_t cell_num) {
     return (char *)node + leaf_node_cell_offset(cell_num);
 }

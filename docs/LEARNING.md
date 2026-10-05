@@ -114,3 +114,61 @@ fixes it, and `rows_in_file` also rejects a length that would leave a partial ro
    It only works while rows are appended and the last page is the only partial one. Any
    layout with real metadata (like B+tree nodes, next phase) needs the count stored in the
    page itself.
+
+## Phase 3: Single-leaf B+tree and cursor
+
+### What was built
+
+- `btree.c`: the on-disk node layout. Page 0 is a leaf with a 14-byte header
+  (node_type, is_root, parent, num_cells, next_leaf) followed by up to 13 cells of
+  key(4) + row(293). Every field has a named offset and a getter/setter.
+- Inserts use a binary search to find the right cell, shift later cells right with
+  `memmove`, and keep the leaf sorted by key. Duplicate keys are rejected with
+  `Error: Duplicate key N.`
+- `cursor.c`: a cursor is a (page, cell) position. `table_start` and `table_find` create
+  one, `cursor_advance` moves it, `cursor_value` reads the row under it. `select` is now
+  just a cursor loop, so it won't need changing when the tree grows.
+- The database file is now always whole pages; anything else is reported as corrupt.
+
+### Key C concepts
+
+- **Alignment and strict aliasing.** `*(uint32_t *)(page + 6)` reads a 4-byte integer
+  from an address that isn't a multiple of 4. That's undefined behaviour in C (UBSan
+  reports it, and some CPUs crash). It also breaks strict-aliasing rules. `memcpy` into a
+  local variable is always defined, and gcc compiles it to the same single instruction.
+- **`memmove` vs `memcpy`.** Shifting cells right copies a region onto an overlapping
+  region. `memcpy` is undefined for overlapping buffers; `memmove` handles them.
+- **`_Static_assert`** pins the layout (14-byte header, 13 cells per leaf) so a wrong
+  constant breaks the build instead of silently changing the file format.
+- **Returning structs by value.** A `Cursor` is 16 bytes, so returning it by value is
+  cheap and means there's no `malloc`/`free` to forget.
+- **Designated initialisers** (`.page_num = ...`) make it obvious which field gets which
+  value, and zero every field that isn't mentioned.
+
+### Trickiest part
+
+Getting the binary search exactly right. It has to return the key's index if it exists,
+and otherwise the index where the key *would* go, including position 0 and position
+`num_cells`. Searching a half-open range `[low, high)` with a clear invariant (everything
+before `low` is smaller, everything from `high` on is bigger or equal) avoids off-by-one
+mistakes. Computing `mid` as `low + (high - low) / 2` avoids overflow.
+
+### Interview questions
+
+1. **Why are B+tree nodes the same size as a page?**
+   One node means one I/O. The tree's height (and so the number of disk reads per lookup)
+   depends on how many keys fit in a node, so filling a whole page maximises fan-out.
+2. **What's the difference between a B-tree and a B+tree?**
+   In a B+tree, rows live only in the leaves. Internal nodes hold just keys and child
+   pointers, so more of them fit per page. The leaves are also linked, which makes range
+   scans a simple walk.
+3. **Why use binary search inside a node when it only has 13 cells?**
+   Internal nodes will hold hundreds of keys. The same sorted-array search works for both
+   node types, and it's O(log n) instead of O(n).
+4. **Why does `(low + high) / 2` have a bug?**
+   With unsigned 32-bit values, `low + high` can overflow past 2^32 and wrap, giving a
+   `mid` that's out of range. `low + (high - low) / 2` can't overflow.
+5. **Why check for a duplicate key before checking if the leaf is full?**
+   If the key already exists, "duplicate key" is the true reason the insert can't happen.
+   Reporting "table full" would be misleading, and after splits exist a full leaf won't
+   even be an error.
