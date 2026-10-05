@@ -48,3 +48,16 @@ def repl(db_bin, db_path):
         return proc.stdout.split("\n")
 
     return run
+
+
+# The tree is a single leaf until splits exist, so 13 rows fill the table.
+LEAF_NODE_MAX_CELLS = 13
+
+
+def select_rows(repl):
+    """Run a fresh session that only selects, and return the printed rows."""
+    out = repl(["select", ".exit"])
+    lines = [line.removeprefix(PROMPT) for line in out]
+    lines = [line for line in lines if line]
+    assert lines[-1] == "Executed."
+    return lines[:-1]

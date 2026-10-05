@@ -15,12 +15,16 @@ Cursor table_start(Table *table) {
     return cursor;
 }
 
-Cursor table_end(Table *table) {
+Cursor table_find(Table *table, uint32_t key) {
+    /* The root is the only leaf for now; descending through internal nodes
+     * comes with multi-level trees. */
+    void *root = pager_get_page(table->pager, table->root_page_num);
+    uint32_t cell_num = leaf_node_find_cell(root, key);
     Cursor cursor = {
         .table = table,
         .page_num = table->root_page_num,
-        .cell_num = root_num_cells(table),
-        .end_of_table = true,
+        .cell_num = cell_num,
+        .end_of_table = cell_num >= leaf_node_num_cells(root),
     };
     return cursor;
 }

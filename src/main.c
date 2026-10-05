@@ -74,6 +74,20 @@ static void report_prepare_error(PrepareResult result, const char *input) {
     }
 }
 
+static void report_execute_result(ExecuteResult result, const Statement *statement) {
+    switch (result) {
+    case EXECUTE_SUCCESS:
+        printf("Executed.\n");
+        break;
+    case EXECUTE_TABLE_FULL:
+        printf("Error: Table full.\n");
+        break;
+    case EXECUTE_DUPLICATE_KEY:
+        printf("Error: Duplicate key %u.\n", statement->row_to_insert.id);
+        break;
+    }
+}
+
 static void run_statement(InputBuffer *input, Table *table) {
     /* prepare_statement tokenizes in place, so keep a copy for error messages. */
     char *original = strdup(input->buffer);
@@ -85,10 +99,8 @@ static void run_statement(InputBuffer *input, Table *table) {
     PrepareResult prepared = prepare_statement(input->buffer, &statement);
     if (prepared != PREPARE_SUCCESS) {
         report_prepare_error(prepared, original);
-    } else if (execute_statement(&statement, table) == EXECUTE_TABLE_FULL) {
-        printf("Error: Table full.\n");
     } else {
-        printf("Executed.\n");
+        report_execute_result(execute_statement(&statement, table), &statement);
     }
     free(original);
 }

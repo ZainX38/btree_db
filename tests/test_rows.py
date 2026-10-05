@@ -16,9 +16,9 @@ def test_insert_and_select(repl):
     ]
 
 
-def test_select_returns_rows_in_insert_order(repl):
+def test_select_returns_rows_in_key_order(repl):
     out = repl(["insert 2 bob b@x", "insert 1 amy a@x", "select", ".exit"])
-    assert out[2:4] == [PROMPT + "(2, bob, b@x)", "(1, amy, a@x)"]
+    assert out[2:4] == [PROMPT + "(1, amy, a@x)", "(2, bob, b@x)"]
 
 
 def test_max_length_strings_are_accepted(repl):

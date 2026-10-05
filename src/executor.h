@@ -9,7 +9,7 @@
 #include "btree.h"
 #include "parser.h"
 
-typedef enum { EXECUTE_SUCCESS, EXECUTE_TABLE_FULL } ExecuteResult;
+typedef enum { EXECUTE_SUCCESS, EXECUTE_TABLE_FULL, EXECUTE_DUPLICATE_KEY } ExecuteResult;
 
 ExecuteResult execute_statement(const Statement *statement, Table *table);
 
