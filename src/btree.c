@@ -83,11 +83,20 @@ void initialize_leaf_node(void *node) {
     set_leaf_node_next_leaf(node, NO_NEXT_LEAF);
 }
 
-void leaf_node_append(void *node, uint32_t key, const Row *value) {
-    uint32_t cell_num = leaf_node_num_cells(node);
+static void *leaf_node_cell(void *node, uint32_t cell_num) {
+    return (char *)node + leaf_node_cell_offset(cell_num);
+}
+
+void leaf_node_insert(void *node, uint32_t cell_num, uint32_t key, const Row *value) {
+    uint32_t num_cells = leaf_node_num_cells(node);
+    if (cell_num < num_cells) {
+        /* memmove, not memcpy: source and destination overlap. */
+        memmove(leaf_node_cell(node, cell_num + 1), leaf_node_cell(node, cell_num),
+                (size_t)(num_cells - cell_num) * LEAF_NODE_CELL_SIZE);
+    }
     set_leaf_node_key(node, cell_num, key);
     serialize_row(value, leaf_node_value(node, cell_num));
-    set_leaf_node_num_cells(node, cell_num + 1);
+    set_leaf_node_num_cells(node, num_cells + 1);
 }
 
 Table *db_open(const char *filename) {

@@ -62,3 +62,7 @@ def test_table_full(repl):
     out = repl(commands + [".exit"])
     assert out[TABLE_MAX_ROWS - 1] == PROMPT + "Executed."
     assert out[TABLE_MAX_ROWS] == PROMPT + "Error: Table full."
+
+
+def test_select_on_empty_table_prints_nothing(repl):
+    assert repl(["select", ".exit"]) == [PROMPT + "Executed.", PROMPT]

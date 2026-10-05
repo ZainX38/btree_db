@@ -75,7 +75,8 @@ void set_leaf_node_key(void *node, uint32_t cell_num, uint32_t key);
 void *leaf_node_value(void *node, uint32_t cell_num);
 
 void initialize_leaf_node(void *node);
-/* Appends a cell to the end of a leaf; the caller checks there is room. */
-void leaf_node_append(void *node, uint32_t key, const Row *value);
+/* Inserts a cell at position `cell_num`, shifting later cells right by one.
+ * The caller checks there is room. */
+void leaf_node_insert(void *node, uint32_t cell_num, uint32_t key, const Row *value);
 
 #endif
