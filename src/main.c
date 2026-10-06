@@ -24,7 +24,11 @@ typedef struct {
     ssize_t length;
 } InputBuffer;
 
-typedef enum { META_COMMAND_EXIT, META_COMMAND_UNRECOGNIZED } MetaCommandResult;
+typedef enum {
+    META_COMMAND_SUCCESS,
+    META_COMMAND_EXIT,
+    META_COMMAND_UNRECOGNIZED,
+} MetaCommandResult;
 
 static void print_prompt(void) {
     printf(PROMPT);
@@ -46,9 +50,14 @@ static bool read_input(InputBuffer *input) {
     return true;
 }
 
-static MetaCommandResult do_meta_command(const InputBuffer *input) {
+static MetaCommandResult do_meta_command(const InputBuffer *input, Table *table) {
     if (strcmp(input->buffer, ".exit") == 0) {
         return META_COMMAND_EXIT;
+    }
+    if (strcmp(input->buffer, ".btree") == 0) {
+        printf("Tree:\n");
+        print_tree(table->pager, table->root_page_num, 0);
+        return META_COMMAND_SUCCESS;
     }
     return META_COMMAND_UNRECOGNIZED;
 }
@@ -122,10 +131,13 @@ int main(int argc, char *argv[]) {
             continue;
         }
         if (input.buffer[0] == '.') {
-            if (do_meta_command(&input) == META_COMMAND_EXIT) {
+            MetaCommandResult result = do_meta_command(&input, table);
+            if (result == META_COMMAND_EXIT) {
                 break;
             }
-            printf("Unrecognized command '%s'.\n", input.buffer);
+            if (result == META_COMMAND_UNRECOGNIZED) {
+                printf("Unrecognized command '%s'.\n", input.buffer);
+            }
             continue;
         }
         run_statement(&input, table);

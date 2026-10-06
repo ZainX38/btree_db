@@ -120,6 +120,27 @@ void leaf_node_insert(void *node, uint32_t cell_num, uint32_t key, const Row *va
     set_leaf_node_num_cells(node, num_cells + 1);
 }
 
+static void print_indent(uint32_t level) {
+    for (uint32_t i = 0; i < level; i++) {
+        printf("  ");
+    }
+}
+
+void print_tree(Pager *pager, uint32_t page_num, uint32_t level) {
+    void *node = pager_get_page(pager, page_num);
+    if (get_node_type(node) == NODE_LEAF) {
+        uint32_t num_cells = leaf_node_num_cells(node);
+        print_indent(level);
+        /* Page numbers are printed so splits can be checked against the
+         * on-disk layout, not just the key order. */
+        printf("- leaf (page %u, size %u)\n", page_num, num_cells);
+        for (uint32_t i = 0; i < num_cells; i++) {
+            print_indent(level + 1);
+            printf("- %u\n", leaf_node_key(node, i));
+        }
+    }
+}
+
 Table *db_open(const char *filename) {
     Table *table = calloc(1, sizeof(Table));
     if (table == NULL) {
