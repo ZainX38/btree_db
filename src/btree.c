@@ -6,6 +6,8 @@
 
 _Static_assert(LEAF_NODE_HEADER_SIZE == 14, "leaf header layout must stay at 14 bytes");
 _Static_assert(LEAF_NODE_MAX_CELLS == 13, "a 4KB leaf holds 13 cells of 297 bytes");
+_Static_assert(INTERNAL_NODE_HEADER_SIZE == 14, "internal header layout must stay at 14 bytes");
+_Static_assert(INTERNAL_NODE_MAX_KEYS == 510, "a 4KB internal node holds 510 keys");
 
 /* Byte-level helpers. memcpy compiles down to a plain load/store on x86, but
  * unlike a pointer cast it is defined for unaligned offsets. */
@@ -47,6 +49,24 @@ void set_node_root(void *node, bool is_root) {
     write_u8(node, IS_ROOT_OFFSET, is_root ? 1 : 0);
 }
 
+uint32_t node_parent(const void *node) {
+    return read_u32(node, PARENT_POINTER_OFFSET);
+}
+
+void set_node_parent(void *node, uint32_t parent) {
+    write_u32(node, PARENT_POINTER_OFFSET, parent);
+}
+
+uint32_t get_node_max_key(Pager *pager, const void *node) {
+    if (get_node_type(node) == NODE_LEAF) {
+        return leaf_node_key(node, leaf_node_num_cells(node) - 1);
+    }
+    /* Keys in an internal node only cover the children to their left; the
+     * largest key is always at the bottom of the right-most path. */
+    void *right_child = pager_get_page(pager, internal_node_right_child(node));
+    return get_node_max_key(pager, right_child);
+}
+
 uint32_t leaf_node_num_cells(const void *node) {
     return read_u32(node, LEAF_NODE_NUM_CELLS_OFFSET);
 }
@@ -73,6 +93,88 @@ void set_leaf_node_key(void *node, uint32_t cell_num, uint32_t key) {
 
 void *leaf_node_value(void *node, uint32_t cell_num) {
     return (char *)node + leaf_node_cell_offset(cell_num) + LEAF_NODE_VALUE_OFFSET;
+}
+
+static uint32_t internal_node_cell_offset(uint32_t cell_num) {
+    return INTERNAL_NODE_HEADER_SIZE + cell_num * INTERNAL_NODE_CELL_SIZE;
+}
+
+uint32_t internal_node_num_keys(const void *node) {
+    return read_u32(node, INTERNAL_NODE_NUM_KEYS_OFFSET);
+}
+
+void set_internal_node_num_keys(void *node, uint32_t num_keys) {
+    write_u32(node, INTERNAL_NODE_NUM_KEYS_OFFSET, num_keys);
+}
+
+uint32_t internal_node_right_child(const void *node) {
+    return read_u32(node, INTERNAL_NODE_RIGHT_CHILD_OFFSET);
+}
+
+void set_internal_node_right_child(void *node, uint32_t page_num) {
+    write_u32(node, INTERNAL_NODE_RIGHT_CHILD_OFFSET, page_num);
+}
+
+/* Following a bad child pointer would silently read some unrelated page, so
+ * an out-of-range index is treated as a bug and stops the program. */
+static void check_child_num(const void *node, uint32_t child_num) {
+    if (child_num > internal_node_num_keys(node)) {
+        fprintf(stderr, "Child %u out of range (node has %u keys).\n", child_num,
+                internal_node_num_keys(node));
+        exit(EXIT_FAILURE);
+    }
+}
+
+uint32_t internal_node_child(const void *node, uint32_t child_num) {
+    check_child_num(node, child_num);
+    if (child_num == internal_node_num_keys(node)) {
+        return internal_node_right_child(node);
+    }
+    return read_u32(node, internal_node_cell_offset(child_num) + INTERNAL_NODE_CHILD_OFFSET);
+}
+
+void set_internal_node_child(void *node, uint32_t child_num, uint32_t page_num) {
+    check_child_num(node, child_num);
+    if (child_num == internal_node_num_keys(node)) {
+        set_internal_node_right_child(node, page_num);
+        return;
+    }
+    write_u32(node, internal_node_cell_offset(child_num) + INTERNAL_NODE_CHILD_OFFSET, page_num);
+}
+
+uint32_t internal_node_key(const void *node, uint32_t key_num) {
+    return read_u32(node, internal_node_cell_offset(key_num) + INTERNAL_NODE_KEY_OFFSET);
+}
+
+void set_internal_node_key(void *node, uint32_t key_num, uint32_t key) {
+    write_u32(node, internal_node_cell_offset(key_num) + INTERNAL_NODE_KEY_OFFSET, key);
+}
+
+void initialize_internal_node(void *node) {
+    memset(node, 0, PAGE_SIZE);
+    set_node_type(node, NODE_INTERNAL);
+    set_node_root(node, false);
+    set_internal_node_num_keys(node, 0);
+    /* A zeroed right child would point at page 0 (the root), which would
+     * turn any bug into an infinite loop instead of an error. */
+    set_internal_node_right_child(node, INVALID_PAGE_NUM);
+}
+
+uint32_t internal_node_find_child(const void *node, uint32_t key) {
+    /* Find the first key >= `key`: since key i is the max of child i, that
+     * child is the only one that can hold `key`. If no key qualifies, the
+     * answer is num_keys, i.e. the right child. */
+    uint32_t low = 0;
+    uint32_t high = internal_node_num_keys(node);
+    while (low < high) {
+        uint32_t mid = low + (high - low) / 2;
+        if (internal_node_key(node, mid) >= key) {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    return low;
 }
 
 void initialize_leaf_node(void *node) {
@@ -138,7 +240,18 @@ void print_tree(Pager *pager, uint32_t page_num, uint32_t level) {
             print_indent(level + 1);
             printf("- %u\n", leaf_node_key(node, i));
         }
+        return;
     }
+
+    uint32_t num_keys = internal_node_num_keys(node);
+    print_indent(level);
+    printf("- internal (page %u, size %u)\n", page_num, num_keys);
+    for (uint32_t i = 0; i < num_keys; i++) {
+        print_tree(pager, internal_node_child(node, i), level + 1);
+        print_indent(level + 1);
+        printf("- key %u\n", internal_node_key(node, i));
+    }
+    print_tree(pager, internal_node_right_child(node), level + 1);
 }
 
 Table *db_open(const char *filename) {
