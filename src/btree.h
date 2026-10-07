@@ -8,7 +8,8 @@
  * read and written with memcpy (see btree.c), never by casting the page to a
  * struct, because some fields are not aligned (e.g. a uint32_t at offset 6).
  *
- * For now the tree is a single leaf, which is also the root at page 0.
+ * Page 0 is always the root. It starts as a leaf and becomes an internal node
+ * the first time it splits.
  */
 
 #include <stdbool.h>
@@ -121,8 +122,10 @@ uint32_t internal_node_find_child(const void *node, uint32_t key);
 /* Prints the subtree rooted at `page_num`, indented by `level`, for the
  * .btree debugging command. */
 void print_tree(Pager *pager, uint32_t page_num, uint32_t level);
-/* Inserts a cell at position `cell_num`, shifting later cells right by one.
- * The caller checks there is room. */
-void leaf_node_insert(void *node, uint32_t cell_num, uint32_t key, const Row *value);
+/* Inserts a row at position `cell_num` of leaf `page_num`, splitting the leaf
+ * if it is full. Returns false when the tree can't grow: a full leaf that
+ * isn't the root would need its parent updated, which isn't supported yet. */
+bool leaf_node_insert(Table *table, uint32_t page_num, uint32_t cell_num, uint32_t key,
+                      const Row *value);
 
 #endif

@@ -87,6 +87,10 @@ void *pager_get_page(Pager *pager, uint32_t page_num) {
     return pager->pages[page_num];
 }
 
+uint32_t pager_get_unused_page_num(const Pager *pager) {
+    return pager->num_pages;
+}
+
 void pager_flush(Pager *pager, uint32_t page_num) {
     void *page = pager->pages[page_num];
     if (page == NULL) {

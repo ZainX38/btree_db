@@ -1,13 +1,6 @@
 """The .btree meta command, used to check the shape of the tree in other tests."""
 
-from conftest import PROMPT
-
-
-def btree(repl, setup=()):
-    """Run `setup` commands, then .btree, and return just the tree lines."""
-    out = repl(list(setup) + [".btree", ".exit"])
-    start = out.index(PROMPT + "Tree:")
-    return out[start + 1 : -1]
+from conftest import btree
 
 
 def test_empty_tree(repl):

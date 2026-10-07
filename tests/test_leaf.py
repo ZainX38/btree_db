@@ -47,7 +47,7 @@ def test_duplicate_is_reported_even_when_leaf_is_full(repl):
     repl([insert(k) for k in range(LEAF_NODE_MAX_CELLS)] + [".exit"])
     out = repl([insert(0), insert(999), ".exit"])
     assert out[0] == PROMPT + "Error: Duplicate key 0."
-    assert out[1] == PROMPT + "Error: Table full."
+    assert out[1] == PROMPT + "Executed."  # a full root leaf now splits instead
 
 
 def test_smallest_and_largest_keys(repl):

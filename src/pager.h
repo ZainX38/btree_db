@@ -24,6 +24,9 @@ typedef struct {
 
 Pager *pager_open(const char *filename);
 void *pager_get_page(Pager *pager, uint32_t page_num);
+/* Pages are never freed yet, so a new page always goes at the end of the
+ * file. The page only counts as used once it is requested with get_page. */
+uint32_t pager_get_unused_page_num(const Pager *pager);
 /* Writes a cached page back to its slot in the file. */
 void pager_flush(Pager *pager, uint32_t page_num);
 /* Frees every cached page and closes the file; does not flush. */
