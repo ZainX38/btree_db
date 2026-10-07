@@ -45,9 +45,30 @@ typedef enum { NODE_INTERNAL = 0, NODE_LEAF = 1 } NodeType;
 #define LEAF_NODE_SPACE_FOR_CELLS (PAGE_SIZE - LEAF_NODE_HEADER_SIZE)
 #define LEAF_NODE_MAX_CELLS (LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE)
 
+/* Internal header: common header, then num_keys(4) right_child(4). */
+#define INTERNAL_NODE_NUM_KEYS_SIZE 4u
+#define INTERNAL_NODE_NUM_KEYS_OFFSET COMMON_NODE_HEADER_SIZE
+#define INTERNAL_NODE_RIGHT_CHILD_SIZE 4u
+#define INTERNAL_NODE_RIGHT_CHILD_OFFSET                                                          \
+    (INTERNAL_NODE_NUM_KEYS_OFFSET + INTERNAL_NODE_NUM_KEYS_SIZE)
+#define INTERNAL_NODE_HEADER_SIZE                                                                 \
+    (COMMON_NODE_HEADER_SIZE + INTERNAL_NODE_NUM_KEYS_SIZE + INTERNAL_NODE_RIGHT_CHILD_SIZE)
+
+/* Internal body: cells of child(4) key(4). Key i is the largest key in child
+ * i's subtree; anything larger than every key lives under right_child. */
+#define INTERNAL_NODE_CHILD_SIZE 4u
+#define INTERNAL_NODE_CHILD_OFFSET 0u
+#define INTERNAL_NODE_KEY_SIZE 4u
+#define INTERNAL_NODE_KEY_OFFSET (INTERNAL_NODE_CHILD_OFFSET + INTERNAL_NODE_CHILD_SIZE)
+#define INTERNAL_NODE_CELL_SIZE (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE)
+#define INTERNAL_NODE_MAX_KEYS                                                                    \
+    ((PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE) / INTERNAL_NODE_CELL_SIZE)
+
 /* Page 0 is always the root, so it can never be anyone's next leaf. That
  * makes 0 a safe "no next leaf" marker. */
 #define NO_NEXT_LEAF 0u
+/* Marks an internal node that doesn't have a right child yet. */
+#define INVALID_PAGE_NUM UINT32_MAX
 
 #define ROOT_PAGE_NUM 0u
 
@@ -64,6 +85,10 @@ NodeType get_node_type(const void *node);
 void set_node_type(void *node, NodeType type);
 bool is_node_root(const void *node);
 void set_node_root(void *node, bool is_root);
+uint32_t node_parent(const void *node);
+void set_node_parent(void *node, uint32_t parent);
+/* Largest key stored anywhere in the subtree rooted at `node`. */
+uint32_t get_node_max_key(Pager *pager, const void *node);
 
 uint32_t leaf_node_num_cells(const void *node);
 void set_leaf_node_num_cells(void *node, uint32_t num_cells);
@@ -78,6 +103,20 @@ void initialize_leaf_node(void *node);
 /* Binary search: returns the index of `key` if present, otherwise the index
  * where it would have to be inserted to keep the cells sorted. */
 uint32_t leaf_node_find_cell(const void *node, uint32_t key);
+
+uint32_t internal_node_num_keys(const void *node);
+void set_internal_node_num_keys(void *node, uint32_t num_keys);
+uint32_t internal_node_right_child(const void *node);
+void set_internal_node_right_child(void *node, uint32_t page_num);
+/* Child `child_num` in 0..num_keys; child num_keys is the right child. */
+uint32_t internal_node_child(const void *node, uint32_t child_num);
+void set_internal_node_child(void *node, uint32_t child_num, uint32_t page_num);
+uint32_t internal_node_key(const void *node, uint32_t key_num);
+void set_internal_node_key(void *node, uint32_t key_num, uint32_t key);
+
+void initialize_internal_node(void *node);
+/* Binary search: index of the child whose subtree should contain `key`. */
+uint32_t internal_node_find_child(const void *node, uint32_t key);
 
 /* Prints the subtree rooted at `page_num`, indented by `level`, for the
  * .btree debugging command. */
