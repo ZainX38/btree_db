@@ -1,9 +1,7 @@
-from conftest import PROMPT
+from conftest import MAX_SEQUENTIAL_ROWS, PROMPT
 
 USERNAME_MAX_LEN = 32
 EMAIL_MAX_LEN = 255
-# The tree is a single leaf until splits exist, so 13 rows fill the table.
-TABLE_MAX_ROWS = 13
 
 
 def test_insert_and_select(repl):
@@ -58,10 +56,10 @@ def test_wrong_number_of_fields_is_a_syntax_error(repl):
 
 
 def test_table_full(repl):
-    commands = [f"insert {i} user{i} user{i}@x" for i in range(TABLE_MAX_ROWS + 1)]
+    commands = [f"insert {i} user{i} user{i}@x" for i in range(MAX_SEQUENTIAL_ROWS + 1)]
     out = repl(commands + [".exit"])
-    assert out[TABLE_MAX_ROWS - 1] == PROMPT + "Executed."
-    assert out[TABLE_MAX_ROWS] == PROMPT + "Error: Table full."
+    assert out[MAX_SEQUENTIAL_ROWS - 1] == PROMPT + "Executed."
+    assert out[MAX_SEQUENTIAL_ROWS] == PROMPT + "Error: Table full."
 
 
 def test_select_on_empty_table_prints_nothing(repl):

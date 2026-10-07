@@ -50,8 +50,10 @@ def repl(db_bin, db_path):
     return run
 
 
-# The tree is a single leaf until splits exist, so 13 rows fill the table.
 LEAF_NODE_MAX_CELLS = 13
+# Only the root leaf can split for now, so sequential inserts fill the left
+# leaf with 7 rows and the right leaf with 13, and then the table is full.
+MAX_SEQUENTIAL_ROWS = 20
 
 
 def select_rows(repl):
@@ -61,3 +63,10 @@ def select_rows(repl):
     lines = [line for line in lines if line]
     assert lines[-1] == "Executed."
     return lines[:-1]
+
+
+def btree(repl, setup=()):
+    """Run `setup` commands, then .btree, and return just the tree lines."""
+    out = repl(list(setup) + [".btree", ".exit"])
+    start = out.index(PROMPT + "Tree:")
+    return out[start + 1 : -1]
