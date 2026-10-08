@@ -172,3 +172,68 @@ mistakes. Computing `mid` as `low + (high - low) / 2` avoids overflow.
    If the key already exists, "duplicate key" is the true reason the insert can't happen.
    Reporting "table full" would be misleading, and after splits exist a full leaf won't
    even be an error.
+
+## Phase 4: Leaf splits and root splits
+
+### What was built
+
+- `.btree`, a meta command that prints the tree with page numbers, so tests can check the
+  exact shape of the tree and which page holds what.
+- The internal node layout: a 14-byte header (node_type, is_root, parent, num_keys,
+  right_child) and up to 510 cells of child(4) + key(4). Key `i` is the largest key under
+  child `i`; anything bigger lives under `right_child`.
+- Leaf splits. When a full leaf gets a 14th cell, the 14 cells are shared 7/7 between the
+  old leaf and a new leaf at the end of the file. The new leaf is linked in through
+  `next_leaf` right after the old one.
+- Root splits. Page 0 must stay the root, so its contents (the left half) are copied to a
+  new page, and page 0 is rewritten as an internal node with one key and two children.
+- `table_find` now walks down through internal nodes using a binary search on their keys.
+  The cursor follows `next_leaf` from one leaf to the next, so `select` still returns rows
+  in key order.
+- Still missing: a leaf below the root can't split yet (it needs its parent updated), so
+  sequential inserts stop at 20 rows with `Error: Table full.`
+
+### Key C concepts
+
+- **Overlapping copies.** In the split loop some cells are "copied" onto themselves.
+  `memcpy` with overlapping (or identical) source and destination is undefined behaviour,
+  and ASan reports it as `memcpy-param-overlap`. `memmove` is defined for that case.
+- **Counting down with unsigned integers.** `for (uint32_t i = n; i >= 0; i--)` never ends,
+  because an unsigned value is always `>= 0` and wraps from 0 to 4294967295.
+  `for (uint32_t pos = n + 1; pos-- > 0;)` tests the value before decrementing it, so it
+  visits `n`..0 and stops.
+- **Sentinel values.** `NO_NEXT_LEAF` is 0 (safe because page 0 is always the root, never
+  a next leaf) and an empty internal node's right child is `UINT32_MAX`. A zeroed pointer
+  would point at the root and turn a bug into an infinite loop.
+- **Recursion over on-disk structures.** `print_tree` and `get_node_max_key` recurse by
+  page number. Each call asks the pager for the page, so the recursion depth is the tree
+  height, not the number of rows.
+- **Fail fast on impossible states.** An out-of-range child index stops the program instead
+  of quietly reading some unrelated page.
+
+### Trickiest part
+
+The split loop. It walks 14 logical positions from the top down. Each position works out
+which leaf it belongs to, its index in that leaf, and whether it's the new cell or an old
+cell that has shifted up by one. Going downwards matters: cells that shift up inside the
+old leaf land on slots that have already been emptied. The boundary tests insert the new
+key at positions 0, 6, 7 and 13 (first, end of the left half, start of the right half,
+last), because those are exactly where an off-by-one would put a cell in the wrong half.
+
+### Interview questions
+
+1. **Why split 7/7 instead of moving just one cell into the new leaf?**
+   An even split leaves room in both leaves, so the next few inserts don't split again.
+   A lopsided split would trigger a new split on almost every insert.
+2. **Why copy the old root to a new page instead of putting the new root on a new page?**
+   Then the root is always page 0, so nothing (the table, the file format) has to store
+   where the root is. Only the two children move, and their parent is always 0.
+3. **What does key `i` in an internal node mean here?**
+   It's the largest key in child `i`'s subtree. A lookup takes the first child whose key is
+   `>= ` the search key, or the right child if there is none.
+4. **Why link leaves with `next_leaf`?**
+   A full scan or range query can then walk the leaves left to right without going back up
+   the tree. That's the main reason B+trees keep rows only in leaves.
+5. **What's the cost of a lookup in this tree?**
+   One page read per level. With 510 keys per internal node and 13 rows per leaf, three
+   levels hold about 3.4 million rows, so a lookup touches at most three pages.
