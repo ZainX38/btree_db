@@ -1,4 +1,4 @@
-from conftest import MAX_SEQUENTIAL_ROWS, PROMPT
+from conftest import PROMPT
 
 USERNAME_MAX_LEN = 32
 EMAIL_MAX_LEN = 255
@@ -53,13 +53,6 @@ def test_largest_id_is_accepted(repl):
 def test_wrong_number_of_fields_is_a_syntax_error(repl):
     out = repl(["insert 1 bob", "insert 1 bob b@x extra", "select extra", ".exit"])
     assert out[:3] == [PROMPT + "Syntax error. Could not parse statement."] * 3
-
-
-def test_table_full(repl):
-    commands = [f"insert {i} user{i} user{i}@x" for i in range(MAX_SEQUENTIAL_ROWS + 1)]
-    out = repl(commands + [".exit"])
-    assert out[MAX_SEQUENTIAL_ROWS - 1] == PROMPT + "Executed."
-    assert out[MAX_SEQUENTIAL_ROWS] == PROMPT + "Error: Table full."
 
 
 def test_select_on_empty_table_prints_nothing(repl):

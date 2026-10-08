@@ -256,12 +256,57 @@ static void create_new_root(Table *table, uint32_t right_child_page_num) {
     set_node_parent(right_child, table->root_page_num);
 }
 
+/* After a child splits, its largest key gets smaller; the parent's key for it
+ * has to follow. A child that is the right child has no key to update. */
+static void update_internal_node_key(void *node, uint32_t old_key, uint32_t new_key) {
+    uint32_t key_num = internal_node_find_child(node, old_key);
+    if (key_num < internal_node_num_keys(node)) {
+        set_internal_node_key(node, key_num, new_key);
+    }
+}
+
+/* Adds `child_page_num` (the new right half of a split) to its parent. The
+ * caller has already checked the parent has room. */
+static void internal_node_insert(Table *table, uint32_t parent_page_num,
+                                 uint32_t child_page_num) {
+    Pager *pager = table->pager;
+    void *parent = pager_get_page(pager, parent_page_num);
+    void *child = pager_get_page(pager, child_page_num);
+    uint32_t child_max_key = get_node_max_key(pager, child);
+    uint32_t index = internal_node_find_child(parent, child_max_key);
+    uint32_t original_num_keys = internal_node_num_keys(parent);
+
+    uint32_t right_child_page_num = internal_node_right_child(parent);
+    void *right_child = pager_get_page(pager, right_child_page_num);
+
+    if (child_max_key > get_node_max_key(pager, right_child)) {
+        /* The new child holds the largest keys, so it becomes the right
+         * child and the old right child moves into the last cell. */
+        set_internal_node_num_keys(parent, original_num_keys + 1);
+        set_internal_node_child(parent, original_num_keys, right_child_page_num);
+        set_internal_node_key(parent, original_num_keys, get_node_max_key(pager, right_child));
+        set_internal_node_right_child(parent, child_page_num);
+        return;
+    }
+
+    /* Otherwise make room at `index` by shifting later cells right by one. */
+    char *cells = (char *)parent + INTERNAL_NODE_HEADER_SIZE;
+    memmove(cells + (index + 1) * INTERNAL_NODE_CELL_SIZE, cells + index * INTERNAL_NODE_CELL_SIZE,
+            (size_t)(original_num_keys - index) * INTERNAL_NODE_CELL_SIZE);
+    set_internal_node_num_keys(parent, original_num_keys + 1);
+    set_internal_node_child(parent, index, child_page_num);
+    set_internal_node_key(parent, index, child_max_key);
+}
+
 /* Moves the 13 old cells plus the new one into the old leaf (left half) and a
  * new leaf (right half), keeping them sorted. */
 static void leaf_node_split_and_insert(Table *table, uint32_t old_page_num, uint32_t cell_num,
                                        uint32_t key, const Row *value) {
     Pager *pager = table->pager;
     void *old_node = pager_get_page(pager, old_page_num);
+    /* Remember the max before the cells move, so the parent's key for the old
+     * leaf can be found afterwards. */
+    uint32_t old_max_key = get_node_max_key(pager, old_node);
     uint32_t new_page_num = pager_get_unused_page_num(pager);
     void *new_node = pager_get_page(pager, new_page_num);
     initialize_leaf_node(new_node);
@@ -294,18 +339,29 @@ static void leaf_node_split_and_insert(Table *table, uint32_t old_page_num, uint
 
     if (is_node_root(old_node)) {
         create_new_root(table, new_page_num);
+        return;
     }
+    uint32_t parent_page_num = node_parent(old_node);
+    void *parent = pager_get_page(pager, parent_page_num);
+    update_internal_node_key(parent, old_max_key, get_node_max_key(pager, old_node));
+    internal_node_insert(table, parent_page_num, new_page_num);
 }
 
 bool leaf_node_insert(Table *table, uint32_t page_num, uint32_t cell_num, uint32_t key,
                       const Row *value) {
-    void *node = pager_get_page(table->pager, page_num);
+    Pager *pager = table->pager;
+    void *node = pager_get_page(pager, page_num);
     if (leaf_node_num_cells(node) < LEAF_NODE_MAX_CELLS) {
         leaf_node_insert_cell(node, cell_num, key, value);
         return true;
     }
+    /* Check before splitting: once the cells have moved there is no clean
+     * way back if the parent turns out to be full. */
     if (!is_node_root(node)) {
-        return false;
+        void *parent = pager_get_page(pager, node_parent(node));
+        if (internal_node_num_keys(parent) >= INTERNAL_NODE_MAX_KEYS) {
+            return false;
+        }
     }
     leaf_node_split_and_insert(table, page_num, cell_num, key, value);
     return true;
