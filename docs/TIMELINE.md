@@ -36,6 +36,22 @@ Use the **Hours** column, not the gaps between dates, as the estimate.
 | 9 | Benchmarks, README, cleanup | 8 |
 | | **Total** | **95** |
 
+## Changes to the plan while building
+
+Hours per phase are unchanged; only what goes into some commits moved.
+
+- **Commit 3** stores rows in a temporary in-memory table with a simple parser, so row
+  serialization could be tested before the pager and SQL parser existed.
+- **Commits 11-13.** A root split needs an internal node, and inserts and selects must be
+  able to go through it, or every commit after the split would fail its tests. So the
+  internal node layout moved into phase 4, the leaf split and root split became one commit,
+  and linking leaves through `next_leaf` happened there too.
+- **Commit 13** was planned as a fix for an off-by-one in the split. A bug can't honestly
+  be planted to be fixed later, so this commit became the boundary tests that would catch
+  that off-by-one.
+- **Phase 5** was rewritten to match: commits 14-17 now cover inserting into the parent,
+  a small fan-out test build, internal splits and tree invariant checks.
+
 ## Commit schedule (all times +01:00)
 
 | # | Date / time | Phase | Hours | Message |
@@ -50,13 +66,13 @@ Use the **Hours** column, not the gaps between dates, as the estimate.
 | 8 | Mon 2026-10-05 02:21 | 3 | 2.5 | feat: cursor to walk leaf cells, select now uses it |
 | 9 | Mon 2026-10-05 23:58 | 3 | 3 | feat: binary search in leaf and reject duplicate keys |
 | 10 | Wed 2026-10-07 00:52 | 4 | 1.5 | Added .btree meta command to print the tree for debugging |
-| 11 | Wed 2026-10-07 02:44 | 4 | 4 | feat: split a full leaf into two and redistribute cells |
-| 12 | Wed 2026-10-07 18:31 | 4 | 4 | feat: root split copies the root to a new page and rewrites page 0 |
-| 13 | Thu 2026-10-08 01:56 | 4 | 2.5 | fix: off by one when the new key lands in the right half of a split |
-| 14 | Thu 2026-10-08 03:07 | 5 | 3 | feat: internal node layout and binary search to find the child |
-| 15 | Fri 2026-10-09 17:49 | 5 | 2.5 | feat: link leaves through next_leaf so select returns rows in key order |
-| 16 | Sat 2026-10-10 01:28 | 5 | 4 | feat: insert into internal nodes and update parent keys after a split |
-| 17 | Sat 2026-10-10 14:36 | 5 | 4.5 | feat: split internal nodes so the tree can grow past two levels |
+| 11 | Wed 2026-10-07 02:44 | 4 | 3 | feat: internal node layout with key and child accessors |
+| 12 | Wed 2026-10-07 18:31 | 4 | 5 | feat: split a full root leaf and rewrite page 0 as an internal root |
+| 13 | Thu 2026-10-08 01:56 | 4 | 2.5 | Added split boundary tests for keys landing in either half |
+| 14 | Thu 2026-10-08 03:07 | 5 | 3 | feat: insert a split leaf into its parent internal node |
+| 15 | Fri 2026-10-09 17:49 | 5 | 2.5 | Added a small fan-out test build so tests can reach deep trees |
+| 16 | Sat 2026-10-10 01:28 | 5 | 4 | feat: split internal nodes so the tree can grow past two levels |
+| 17 | Sat 2026-10-10 14:36 | 5 | 4.5 | Added .btree invariant checks for key order, parent pointers and the leaf chain |
 | 18 | Sat 2026-10-10 16:12 | 5 | 2 | Added random insert test checked against a sorted Python list |
 | 19 | Mon 2026-10-12 00:41 | 6 | 3.5 | feat: page cache with fixed frames and dirty page tracking |
 | 20 | Mon 2026-10-12 02:33 | 6 | 4 | feat: LRU eviction with pin counts and configurable cache size |
