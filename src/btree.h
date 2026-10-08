@@ -123,8 +123,8 @@ uint32_t internal_node_find_child(const void *node, uint32_t key);
  * .btree debugging command. */
 void print_tree(Pager *pager, uint32_t page_num, uint32_t level);
 /* Inserts a row at position `cell_num` of leaf `page_num`, splitting the leaf
- * if it is full. Returns false when the tree can't grow: a full leaf that
- * isn't the root would need its parent updated, which isn't supported yet. */
+ * if it is full. Returns false when the tree can't grow: splitting would need
+ * a key added to a full internal node, which can't split yet. */
 bool leaf_node_insert(Table *table, uint32_t page_num, uint32_t cell_num, uint32_t key,
                       const Row *value);
 

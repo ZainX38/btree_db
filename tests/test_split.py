@@ -2,7 +2,7 @@
 
 import struct
 
-from conftest import LEAF_NODE_MAX_CELLS, MAX_SEQUENTIAL_ROWS, PROMPT, btree, select_rows
+from conftest import LEAF_NODE_MAX_CELLS, PROMPT, btree, select_rows
 
 PAGE_SIZE = 4096
 NODE_INTERNAL = 0
@@ -54,8 +54,8 @@ def test_page_zero_becomes_the_internal_root(repl, db_path):
         assert data[page * PAGE_SIZE + IS_ROOT_OFFSET] == 0
 
 
-def test_select_walks_both_leaves_in_order(repl):
-    keys = list(range(MAX_SEQUENTIAL_ROWS, 0, -1))
+def test_select_walks_every_leaf_in_order(repl):
+    keys = list(range(300, 0, -1))
     repl([insert(k) for k in keys] + [".exit"])
     assert select_rows(repl) == [row(k) for k in sorted(keys)]
 
@@ -73,8 +73,36 @@ def test_duplicates_are_found_in_either_leaf(repl):
     assert out[:2] == [PROMPT + "Error: Duplicate key 3.", PROMPT + "Error: Duplicate key 12."]
 
 
-def test_full_non_root_leaf_is_reported(repl):
-    # Splitting a leaf below the root needs its parent updated, which comes next.
-    out = repl([insert(k) for k in range(MAX_SEQUENTIAL_ROWS + 1)] + [".exit"])
-    assert out[MAX_SEQUENTIAL_ROWS - 1] == PROMPT + "Executed."
-    assert out[MAX_SEQUENTIAL_ROWS] == PROMPT + "Error: Table full."
+def test_right_most_leaf_split_adds_a_new_right_child(repl):
+    keys = list(range(1, 22))  # the 21st insert splits the right-most leaf
+    assert btree(repl, [insert(k) for k in keys]) == (
+        ["- internal (page 0, size 2)"]
+        + leaf_lines(2, keys[:7])
+        + ["  - key 7"]
+        + leaf_lines(1, keys[7:14])
+        + ["  - key 14"]
+        + leaf_lines(3, keys[14:])
+    )
+
+
+def test_middle_leaf_split_updates_the_parent_key(repl):
+    # Leave gaps so the left leaf can fill up and split while a right leaf exists.
+    tens = [10 * i for i in range(1, LEAF_NODE_MAX_CELLS + 2)]  # 10..140, splits the root
+    small = list(range(1, 8))  # fills the left leaf (10..70) and splits it
+    assert btree(repl, [insert(k) for k in tens + small]) == (
+        ["- internal (page 0, size 2)"]
+        + leaf_lines(2, small)
+        + ["  - key 7"]
+        + leaf_lines(3, tens[:7])
+        + ["  - key 70"]
+        + leaf_lines(1, tens[7:])
+    )
+    assert select_rows(repl) == [row(k) for k in small + tens]
+
+
+def test_hundreds_of_rows_survive_a_restart(repl):
+    keys = list(range(0, 1500, 3))
+    repl([insert(k) for k in keys] + [".exit"])
+    out = repl([insert(k) for k in (1, 2, 1499)] + [".exit"])
+    assert out[:3] == [PROMPT + "Executed."] * 3
+    assert select_rows(repl) == [row(k) for k in sorted(keys + [1, 2, 1499])]

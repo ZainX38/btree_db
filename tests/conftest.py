@@ -51,9 +51,6 @@ def repl(db_bin, db_path):
 
 
 LEAF_NODE_MAX_CELLS = 13
-# Only the root leaf can split for now, so sequential inserts fill the left
-# leaf with 7 rows and the right leaf with 13, and then the table is full.
-MAX_SEQUENTIAL_ROWS = 20
 
 
 def select_rows(repl):
