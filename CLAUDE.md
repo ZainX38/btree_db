@@ -12,7 +12,7 @@ Everything builds and runs on Linux. On this Windows machine, run commands insid
 |---|---|
 | Debug build (ASan + UBSan, the default) | `make` |
 | Release build (`-O2`, no sanitizers) | `make release` |
-| Tests (pytest, against the debug build) | `make test` |
+| Tests (pytest, against the debug build and a small fan-out build) | `make test` |
 | Benchmarks (release build) | `make release && .venv/bin/python bench/bench.py` |
 | One-time test setup | `python3 -m venv .venv && .venv/bin/pip install pytest` |
 

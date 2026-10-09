@@ -8,26 +8,24 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_BIN = ROOT / "build" / "debug" / "btree_db"
+# Same code built with INTERNAL_NODE_MAX_KEYS=3 (see the Makefile).
+SMALL_FANOUT_BIN = ROOT / "build" / "small_fanout" / "btree_db"
+SMALL_FANOUT_MAX_KEYS = 3
 PROMPT = "db > "
 # Sanitizer builds are slow; this only exists so a hung REPL fails the test.
 TIMEOUT_SECONDS = 120
 
+LEAF_NODE_MAX_CELLS = 13
 
-@pytest.fixture
-def db_bin():
-    # BTREE_DB_BIN lets the benchmark or a CI job point tests at another build.
-    path = pathlib.Path(os.environ.get("BTREE_DB_BIN", DEFAULT_BIN))
-    assert path.exists(), f"binary not built: {path} (run make)"
+
+def find_binary(env_var, default):
+    # The env var lets the benchmark or a CI job point tests at another build.
+    path = pathlib.Path(os.environ.get(env_var, default))
+    assert path.exists(), f"binary not built: {path} (run make test)"
     return str(path)
 
 
-@pytest.fixture
-def db_path(tmp_path):
-    return tmp_path / "test.db"
-
-
-@pytest.fixture
-def repl(db_bin, db_path):
+def make_runner(binary, db_path):
     """Return run(commands) -> stdout lines.
 
     Each call is a fresh process on the same database file, so calling it twice
@@ -36,7 +34,7 @@ def repl(db_bin, db_path):
 
     def run(commands):
         proc = subprocess.run(
-            [db_bin, str(db_path)],
+            [binary, str(db_path)],
             input="".join(c + "\n" for c in commands),
             capture_output=True,
             text=True,
@@ -50,7 +48,24 @@ def repl(db_bin, db_path):
     return run
 
 
-LEAF_NODE_MAX_CELLS = 13
+@pytest.fixture
+def db_bin():
+    return find_binary("BTREE_DB_BIN", DEFAULT_BIN)
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    return tmp_path / "test.db"
+
+
+@pytest.fixture
+def repl(db_bin, db_path):
+    return make_runner(db_bin, db_path)
+
+
+@pytest.fixture
+def small_fanout_repl(db_path):
+    return make_runner(find_binary("BTREE_DB_SMALL_FANOUT_BIN", SMALL_FANOUT_BIN), db_path)
 
 
 def select_rows(repl):

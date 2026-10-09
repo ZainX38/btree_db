@@ -7,7 +7,10 @@
 _Static_assert(LEAF_NODE_HEADER_SIZE == 14, "leaf header layout must stay at 14 bytes");
 _Static_assert(LEAF_NODE_MAX_CELLS == 13, "a 4KB leaf holds 13 cells of 297 bytes");
 _Static_assert(INTERNAL_NODE_HEADER_SIZE == 14, "internal header layout must stay at 14 bytes");
-_Static_assert(INTERNAL_NODE_MAX_KEYS == 510, "a 4KB internal node holds 510 keys");
+_Static_assert(INTERNAL_NODE_MAX_KEYS_DEFAULT == 510, "a 4KB internal node holds 510 keys");
+_Static_assert(INTERNAL_NODE_MAX_KEYS >= 2 &&
+                   INTERNAL_NODE_MAX_KEYS <= INTERNAL_NODE_MAX_KEYS_DEFAULT,
+               "fan-out override must leave both halves of a split non-empty and fit in a page");
 
 /* A split shares the 13 existing cells plus the new one between two leaves,
  * as evenly as possible (7 and 7). */

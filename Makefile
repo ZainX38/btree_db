@@ -21,6 +21,15 @@ RELEASE_OBJ := $(SRC:src/%.c=$(RELEASE_DIR)/%.o)
 DEBUG_BIN := $(DEBUG_DIR)/btree_db
 RELEASE_BIN := $(RELEASE_DIR)/btree_db
 
+# A second sanitized build whose internal nodes hold only a few keys, so tests
+# can grow deep trees (and hit internal splits) with a few dozen rows instead
+# of millions.
+SMALL_FANOUT_MAX_KEYS := 3
+SMALL_FANOUT_FLAGS := $(DEBUG_FLAGS) -DINTERNAL_NODE_MAX_KEYS_OVERRIDE=$(SMALL_FANOUT_MAX_KEYS)
+SMALL_FANOUT_DIR := build/small_fanout
+SMALL_FANOUT_OBJ := $(SRC:src/%.c=$(SMALL_FANOUT_DIR)/%.o)
+SMALL_FANOUT_BIN := $(SMALL_FANOUT_DIR)/btree_db
+
 # Prefer the project venv (where pytest is installed) over the system Python.
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
@@ -44,13 +53,19 @@ $(DEBUG_DIR)/%.o: src/%.c | $(DEBUG_DIR)
 $(RELEASE_DIR)/%.o: src/%.c | $(RELEASE_DIR)
 	$(CC) $(CSTD) $(WARN) $(DEPFLAGS) $(RELEASE_FLAGS) -c $< -o $@
 
-$(DEBUG_DIR) $(RELEASE_DIR):
+$(SMALL_FANOUT_BIN): $(SMALL_FANOUT_OBJ)
+	$(CC) $(SMALL_FANOUT_FLAGS) $^ -o $@
+
+$(SMALL_FANOUT_DIR)/%.o: src/%.c | $(SMALL_FANOUT_DIR)
+	$(CC) $(CSTD) $(WARN) $(DEPFLAGS) $(SMALL_FANOUT_FLAGS) -c $< -o $@
+
+$(DEBUG_DIR) $(RELEASE_DIR) $(SMALL_FANOUT_DIR):
 	mkdir -p $@
 
-test: $(DEBUG_BIN)
+test: $(DEBUG_BIN) $(SMALL_FANOUT_BIN)
 	$(PYTHON) -m pytest -q tests
 
 clean:
 	rm -rf build
 
--include $(DEBUG_OBJ:.o=.d) $(RELEASE_OBJ:.o=.d)
+-include $(DEBUG_OBJ:.o=.d) $(RELEASE_OBJ:.o=.d) $(SMALL_FANOUT_OBJ:.o=.d)
