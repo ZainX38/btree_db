@@ -62,8 +62,16 @@ typedef enum { NODE_INTERNAL = 0, NODE_LEAF = 1 } NodeType;
 #define INTERNAL_NODE_KEY_SIZE 4u
 #define INTERNAL_NODE_KEY_OFFSET (INTERNAL_NODE_CHILD_OFFSET + INTERNAL_NODE_CHILD_SIZE)
 #define INTERNAL_NODE_CELL_SIZE (INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE)
-#define INTERNAL_NODE_MAX_KEYS                                                                    \
+#define INTERNAL_NODE_MAX_KEYS_DEFAULT                                                            \
     ((PAGE_SIZE - INTERNAL_NODE_HEADER_SIZE) / INTERNAL_NODE_CELL_SIZE)
+/* Tests build a second binary with a tiny fan-out (see the Makefile), so deep
+ * trees and internal splits show up after a few dozen rows. The on-disk
+ * layout is the same; nodes just stop accepting keys earlier. */
+#ifdef INTERNAL_NODE_MAX_KEYS_OVERRIDE
+#define INTERNAL_NODE_MAX_KEYS ((uint32_t)INTERNAL_NODE_MAX_KEYS_OVERRIDE)
+#else
+#define INTERNAL_NODE_MAX_KEYS INTERNAL_NODE_MAX_KEYS_DEFAULT
+#endif
 
 /* Page 0 is always the root, so it can never be anyone's next leaf. That
  * makes 0 a safe "no next leaf" marker. */
