@@ -106,3 +106,12 @@ def test_hundreds_of_rows_survive_a_restart(repl):
     out = repl([insert(k) for k in (1, 2, 1499)] + [".exit"])
     assert out[:3] == [PROMPT + "Executed."] * 3
     assert select_rows(repl) == [row(k) for k in sorted(keys + [1, 2, 1499])]
+
+
+def test_full_root_with_default_fan_out_splits(repl):
+    # 510 keys per internal node: about 3600 sequential rows fill the root.
+    keys = list(range(4000))
+    tree = btree(repl, [insert(k) for k in keys])
+    assert tree[0] == "- internal (page 0, size 1)"
+    assert tree[1].startswith("  - internal (page ")
+    assert select_rows(repl) == [row(k) for k in keys]

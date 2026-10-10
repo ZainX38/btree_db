@@ -13,9 +13,7 @@ static ExecuteResult execute_insert(const Statement *statement, Table *table) {
         leaf_node_key(leaf, cursor.cell_num) == row->id) {
         return EXECUTE_DUPLICATE_KEY;
     }
-    if (!leaf_node_insert(table, cursor.page_num, cursor.cell_num, row->id, row)) {
-        return EXECUTE_TABLE_FULL;
-    }
+    leaf_node_insert(table, cursor.page_num, cursor.cell_num, row->id, row);
     return EXECUTE_SUCCESS;
 }
 

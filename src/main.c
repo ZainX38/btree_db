@@ -88,9 +88,6 @@ static void report_execute_result(ExecuteResult result, const Statement *stateme
     case EXECUTE_SUCCESS:
         printf("Executed.\n");
         break;
-    case EXECUTE_TABLE_FULL:
-        printf("Error: Table full.\n");
-        break;
     case EXECUTE_DUPLICATE_KEY:
         printf("Error: Duplicate key %u.\n", statement->row_to_insert.id);
         break;
