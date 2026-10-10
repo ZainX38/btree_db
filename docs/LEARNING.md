@@ -237,3 +237,72 @@ last), because those are exactly where an off-by-one would put a cell in the wro
 5. **What's the cost of a lookup in this tree?**
    One page read per level. With 510 keys per internal node and 13 rows per leaf, three
    levels hold about 3.4 million rows, so a lookup touches at most three pages.
+
+## Phase 5: Internal nodes and multi-level trees
+
+### What was built
+
+- Splitting any leaf, not just the root. After a split, the parent's key for the old
+  leaf is lowered to its new largest key, and the new leaf is added to the parent just
+  after it (or becomes the parent's right child if it holds the largest keys).
+- Internal node splits. All the children of a full internal node, plus the new one, are
+  listed in key order and shared between the old node (left half) and a new node (right
+  half). Every moved child gets its parent pointer updated, and the new node is added to
+  the grandparent, which may split in turn. A full root is handled the same way as a leaf
+  root: its contents move to a new page and page 0 becomes the new root.
+- A second test build with `INTERNAL_NODE_MAX_KEYS=3`, so tests reach three or four levels
+  with a few hundred rows instead of millions. The on-disk layout doesn't change.
+- `.validate`, which checks every rule the tree depends on: root flags, parent pointers,
+  key order and ranges, parent keys matching their child's largest key, all leaves at the
+  same depth, and a `next_leaf` chain that visits every leaf in order.
+- Random-insert tests that compare thousands of inserts (with duplicates) against a sorted
+  Python reference, on both builds and across restarts.
+
+### Key C concepts
+
+- **Mutual recursion and forward declarations.** `internal_node_insert` calls
+  `internal_node_split_and_insert`, which calls `internal_node_insert` on the parent. C
+  needs a declaration before the first use, so one of them is declared ahead of time.
+- **Compile-time configuration with the preprocessor.** `#ifdef` picks the fan-out at
+  build time, and `_Static_assert` rejects nonsense values (fewer than 2 keys, or more than
+  fit in a page).
+- **Stack arrays of structs.** The split collects up to 512 `ChildEntry` values in a local
+  array (4KB). That's fine on the stack and needs no `malloc`/`free`.
+- **`int64_t` for bounds.** Key ranges need "no lower bound", which doesn't fit in a
+  `uint32_t`. Using a wider signed type gives a value (-1) below every real key.
+- **Pointers into the page cache.** Every page stays in memory for now, so a page pointer
+  stays valid for the whole insert. That won't be true once pages can be evicted (phase 6),
+  which is why page pointers need pinning.
+
+### Trickiest part
+
+Keeping parent pointers and parent keys correct when an internal node splits. Every child
+that moves to the new node must be told its new parent, and when the root splits its
+children have to be re-pointed again, because the root's contents are copied to a new page.
+Bugs here don't show up in `select` straight away; they appear several splits later, as a
+lookup going down the wrong branch. Two things made it manageable: `.validate`, which checks
+every rule after each test, and the small fan-out build, which makes deep trees cheap to
+test.
+
+### Interview questions
+
+1. **Why does splitting a node sometimes cause its parent to split too?**
+   A split adds a child, and so a key, to the parent. If the parent is full it must split
+   as well, and this can continue up to the root. When the root splits, the tree gets one
+   level taller, which is the only way a B+tree grows in height.
+2. **Why is a B+tree always balanced?**
+   It grows only at the root: a root split adds a new level above every leaf at once. All
+   leaves therefore stay at the same depth, which `.validate` checks.
+3. **What goes wrong if a parent pointer is stale?**
+   The next split of that child adds its new sibling to the wrong node, or reads an
+   unrelated page as its parent. The tree ends up with keys in the wrong subtree, so lookups
+   miss rows that are really there.
+4. **Why test with a fan-out of 3 when the real one is 510?**
+   With 510 keys per node, reaching three levels takes about 3,600 rows and four levels
+   about 1.8 million. A tiny fan-out runs the same code paths (internal splits, root splits
+   of internal nodes, deep recursion) with a few dozen rows, so tests stay fast and failures
+   are small enough to read with `.btree`.
+5. **How do you test a data structure when you can't see inside it?**
+   Use a simple reference model (a sorted Python list), compare every output against it
+   over thousands of random operations, and run an invariant checker after each run. Random
+   inputs find the cases nobody thought to write by hand.
