@@ -50,7 +50,8 @@ Hours per phase are unchanged; only what goes into some commits moved.
   be planted to be fixed later, so this commit became the boundary tests that would catch
   that off-by-one.
 - **Phase 5** was rewritten to match: commits 14-17 now cover inserting into the parent,
-  a small fan-out test build, internal splits and tree invariant checks.
+  a small fan-out test build, internal splits and a `.validate` command that checks the
+  tree's invariants (kept separate from `.btree` so its exact output stays stable).
 
 ## Commit schedule (all times +01:00)
 
@@ -72,7 +73,7 @@ Hours per phase are unchanged; only what goes into some commits moved.
 | 14 | Thu 2026-10-08 03:07 | 5 | 3 | feat: insert a split leaf into its parent internal node |
 | 15 | Fri 2026-10-09 17:49 | 5 | 2.5 | Added a small fan-out test build so tests can reach deep trees |
 | 16 | Sat 2026-10-10 01:28 | 5 | 4 | feat: split internal nodes so the tree can grow past two levels |
-| 17 | Sat 2026-10-10 14:36 | 5 | 4.5 | Added .btree invariant checks for key order, parent pointers and the leaf chain |
+| 17 | Sat 2026-10-10 14:36 | 5 | 4.5 | Added .validate meta command that checks key order, parent pointers and the leaf chain |
 | 18 | Sat 2026-10-10 16:12 | 5 | 2 | Added random insert test checked against a sorted Python list |
 | 19 | Mon 2026-10-12 00:41 | 6 | 3.5 | feat: page cache with fixed frames and dirty page tracking |
 | 20 | Mon 2026-10-12 02:33 | 6 | 4 | feat: LRU eviction with pin counts and configurable cache size |

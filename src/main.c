@@ -59,6 +59,10 @@ static MetaCommandResult do_meta_command(const InputBuffer *input, Table *table)
         print_tree(table->pager, table->root_page_num, 0);
         return META_COMMAND_SUCCESS;
     }
+    if (strcmp(input->buffer, ".validate") == 0) {
+        validate_tree(table);
+        return META_COMMAND_SUCCESS;
+    }
     return META_COMMAND_UNRECOGNIZED;
 }
 
