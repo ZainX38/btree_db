@@ -13,7 +13,9 @@
 #include <stdint.h>
 
 #define PAGE_SIZE 4096u
-#define PAGER_MAX_PAGES 100u
+/* Every page stays in memory until the cache arrives, so this caps the file
+ * at 8MB. Deep test trees (small fan-out) need a few hundred pages. */
+#define PAGER_MAX_PAGES 2048u
 
 typedef struct {
     int fd;
