@@ -468,6 +468,123 @@ void leaf_node_insert(Table *table, uint32_t page_num, uint32_t cell_num, uint32
     leaf_node_split_and_insert(table, page_num, cell_num, key, value);
 }
 
+/* State carried through the validation walk. Leaves are visited left to
+ * right, so each one can be checked against the previous leaf's next_leaf. */
+typedef struct {
+    Pager *pager;
+    bool seen_leaf;
+    uint32_t leaf_depth;
+    uint32_t prev_leaf;
+} TreeCheck;
+
+/* Key bounds use int64_t so "no lower bound" (-1) is outside every uint32_t. */
+#define NO_LOWER_BOUND (-1)
+
+static bool check_failed(uint32_t page_num, const char *problem) {
+    printf("Invalid tree: page %u: %s.\n", page_num, problem);
+    return false;
+}
+
+static bool check_node(TreeCheck *check, uint32_t page_num, uint32_t parent, uint32_t depth,
+                       int64_t low, int64_t high);
+
+/* Every key in a subtree must lie in (low, high]. */
+static bool key_in_range(uint32_t key, int64_t low, int64_t high) {
+    return (int64_t)key > low && (int64_t)key <= high;
+}
+
+static bool check_leaf(TreeCheck *check, uint32_t page_num, const void *node, uint32_t depth,
+                       int64_t low, int64_t high) {
+    uint32_t num_cells = leaf_node_num_cells(node);
+    if (num_cells > LEAF_NODE_MAX_CELLS) {
+        return check_failed(page_num, "leaf has too many cells");
+    }
+    if (num_cells == 0 && page_num != ROOT_PAGE_NUM) {
+        return check_failed(page_num, "non-root leaf is empty");
+    }
+    int64_t prev = low;
+    for (uint32_t i = 0; i < num_cells; i++) {
+        uint32_t key = leaf_node_key(node, i);
+        if ((int64_t)key <= prev || !key_in_range(key, low, high)) {
+            return check_failed(page_num, "keys out of order");
+        }
+        prev = key;
+    }
+
+    /* A B+tree is balanced only if every leaf is at the same depth. */
+    if (check->seen_leaf && depth != check->leaf_depth) {
+        return check_failed(page_num, "leaves at different depths");
+    }
+    if (check->seen_leaf) {
+        void *prev_leaf = pager_get_page(check->pager, check->prev_leaf);
+        if (leaf_node_next_leaf(prev_leaf) != page_num) {
+            return check_failed(check->prev_leaf, "next_leaf does not point at the next leaf");
+        }
+    }
+    check->seen_leaf = true;
+    check->leaf_depth = depth;
+    check->prev_leaf = page_num;
+    return true;
+}
+
+static bool check_internal(TreeCheck *check, uint32_t page_num, const void *node, uint32_t depth,
+                           int64_t low, int64_t high) {
+    uint32_t num_keys = internal_node_num_keys(node);
+    if (num_keys == 0 || num_keys > INTERNAL_NODE_MAX_KEYS) {
+        return check_failed(page_num, "internal node has a bad number of keys");
+    }
+    int64_t prev = low;
+    for (uint32_t i = 0; i <= num_keys; i++) {
+        bool is_right_child = i == num_keys;
+        /* The right child is bounded by this node's own upper bound. */
+        int64_t child_high = is_right_child ? high : internal_node_key(node, i);
+        if (!is_right_child && (child_high <= prev || child_high > high)) {
+            return check_failed(page_num, "keys out of order");
+        }
+        uint32_t child_page_num = internal_node_child(node, i);
+        if (!check_node(check, child_page_num, page_num, depth + 1, prev, child_high)) {
+            return false;
+        }
+        void *child = pager_get_page(check->pager, child_page_num);
+        if (!is_right_child && get_node_max_key(check->pager, child) != child_high) {
+            return check_failed(page_num, "key does not match its child's largest key");
+        }
+        prev = child_high;
+    }
+    return true;
+}
+
+static bool check_node(TreeCheck *check, uint32_t page_num, uint32_t parent, uint32_t depth,
+                       int64_t low, int64_t high) {
+    void *node = pager_get_page(check->pager, page_num);
+    bool should_be_root = page_num == ROOT_PAGE_NUM;
+    if (is_node_root(node) != should_be_root) {
+        return check_failed(page_num, "root flag is wrong");
+    }
+    /* The root's parent field is never read, so only children are checked. */
+    if (!should_be_root && node_parent(node) != parent) {
+        return check_failed(page_num, "parent pointer is wrong");
+    }
+    if (get_node_type(node) == NODE_LEAF) {
+        return check_leaf(check, page_num, node, depth, low, high);
+    }
+    return check_internal(check, page_num, node, depth, low, high);
+}
+
+bool validate_tree(Table *table) {
+    TreeCheck check = {.pager = table->pager};
+    if (!check_node(&check, table->root_page_num, ROOT_PAGE_NUM, 0, NO_LOWER_BOUND,
+                    UINT32_MAX)) {
+        return false;
+    }
+    void *last_leaf = pager_get_page(table->pager, check.prev_leaf);
+    if (leaf_node_next_leaf(last_leaf) != NO_NEXT_LEAF) {
+        return check_failed(check.prev_leaf, "last leaf has a next_leaf");
+    }
+    printf("Tree is valid.\n");
+    return true;
+}
+
 static void print_indent(uint32_t level) {
     for (uint32_t i = 0; i < level; i++) {
         printf("  ");

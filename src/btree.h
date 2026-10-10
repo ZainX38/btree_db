@@ -127,6 +127,11 @@ void initialize_internal_node(void *node);
 /* Binary search: index of the child whose subtree should contain `key`. */
 uint32_t internal_node_find_child(const void *node, uint32_t key);
 
+/* Checks every structural rule of the tree (key order, parent pointers, leaf
+ * depth, the next_leaf chain). Prints the first problem found, or
+ * "Tree is valid.", and returns whether the tree is valid. */
+bool validate_tree(Table *table);
+
 /* Prints the subtree rooted at `page_num`, indented by `level`, for the
  * .btree debugging command. */
 void print_tree(Pager *pager, uint32_t page_num, uint32_t level);
