@@ -96,8 +96,8 @@ bool is_node_root(const void *node);
 void set_node_root(void *node, bool is_root);
 uint32_t node_parent(const void *node);
 void set_node_parent(void *node, uint32_t parent);
-/* Largest key stored anywhere in the subtree rooted at `node`. */
-uint32_t get_node_max_key(Pager *pager, const void *node);
+/* Largest key stored anywhere in the subtree rooted at `page_num`. */
+uint32_t get_node_max_key(Pager *pager, uint32_t page_num);
 
 uint32_t leaf_node_num_cells(const void *node);
 void set_leaf_node_num_cells(void *node, uint32_t num_cells);

@@ -1,3 +1,4 @@
+import os
 import struct
 import subprocess
 
@@ -57,3 +58,15 @@ def test_missing_filename_is_an_error(db_bin):
                           timeout=TIMEOUT_SECONDS)
     assert proc.returncode != 0
     assert "Usage:" in proc.stderr
+
+
+def test_read_only_session_writes_nothing(repl, db_path):
+    # Only dirty pages are written back, so selecting and printing the tree
+    # must leave the file untouched. Back-date the mtime first so even a
+    # rewrite with identical bytes would be noticed.
+    repl([f"insert {i} u{i} e{i}" for i in range(100)] + [".exit"])
+    os.utime(db_path, ns=(1_000_000_000, 1_000_000_000))
+    before = db_path.read_bytes()
+    repl(["select", ".btree", ".validate", ".exit"])
+    assert db_path.stat().st_mtime_ns == 1_000_000_000
+    assert db_path.read_bytes() == before

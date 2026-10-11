@@ -17,12 +17,11 @@ static void die(const char *what) {
     exit(EXIT_FAILURE);
 }
 
-static void *alloc_page(void) {
-    void *page = calloc(1, PAGE_SIZE);
-    if (page == NULL) {
-        die("calloc");
-    }
-    return page;
+/* Pin bookkeeping mistakes are bugs in the caller, not runtime conditions,
+ * and carrying on would risk using an evicted buffer. */
+static void pin_bug(const char *problem, uint32_t page_num) {
+    fprintf(stderr, "Pager bug: %s (page %u).\n", problem, page_num);
+    abort();
 }
 
 static off_t page_offset(uint32_t page_num) {
@@ -54,19 +53,16 @@ Pager *pager_open(const char *filename) {
         die("calloc");
     }
     pager->fd = fd;
-    pager->file_length = (uint32_t)st.st_size;
-    pager->num_pages = pager->file_length / PAGE_SIZE;
+    pager->num_pages = (uint32_t)(st.st_size / PAGE_SIZE);
     return pager;
 }
 
-/* Fills a fresh buffer from disk. Pages past the end of the file have never
- * been written, so they stay zeroed. */
+/* Fills a buffer from disk. A page past the end of the file has never been
+ * written, so it reads as zeros; anything between 0 and a full page is a
+ * torn write. */
 static void load_page(Pager *pager, uint32_t page_num, void *page) {
-    if (page_num >= pager->file_length / PAGE_SIZE) {
-        return;
-    }
     ssize_t got = pread(pager->fd, page, PAGE_SIZE, page_offset(page_num));
-    if (got != (ssize_t)PAGE_SIZE) {
+    if (got != 0 && got != (ssize_t)PAGE_SIZE) {
         die("pread");
     }
 }
@@ -76,35 +72,65 @@ void *pager_get_page(Pager *pager, uint32_t page_num) {
         fprintf(stderr, "Page %u is out of bounds (max %u).\n", page_num, PAGER_MAX_PAGES);
         exit(EXIT_FAILURE);
     }
-    if (pager->pages[page_num] == NULL) {
-        void *page = alloc_page();
-        load_page(pager, page_num, page);
-        pager->pages[page_num] = page;
+    CachedPage *entry = &pager->pages[page_num];
+    if (entry->data == NULL) {
+        entry->data = calloc(1, PAGE_SIZE);
+        if (entry->data == NULL) {
+            die("calloc");
+        }
+        load_page(pager, page_num, entry->data);
         if (page_num >= pager->num_pages) {
             pager->num_pages = page_num + 1;
         }
     }
-    return pager->pages[page_num];
+    entry->pin_count++;
+    return entry->data;
+}
+
+void pager_unpin(Pager *pager, uint32_t page_num) {
+    CachedPage *entry = &pager->pages[page_num];
+    if (entry->pin_count == 0) {
+        pin_bug("unpin of a page that isn't pinned", page_num);
+    }
+    entry->pin_count--;
+}
+
+void pager_mark_dirty(Pager *pager, uint32_t page_num) {
+    CachedPage *entry = &pager->pages[page_num];
+    /* Writing to an unpinned page means the caller kept a stale pointer. */
+    if (entry->pin_count == 0) {
+        pin_bug("page marked dirty while not pinned", page_num);
+    }
+    entry->dirty = true;
 }
 
 uint32_t pager_get_unused_page_num(const Pager *pager) {
     return pager->num_pages;
 }
 
-void pager_flush(Pager *pager, uint32_t page_num) {
-    void *page = pager->pages[page_num];
-    if (page == NULL) {
-        return; /* never loaded, so the copy on disk is already current */
-    }
-    ssize_t written = pwrite(pager->fd, page, PAGE_SIZE, page_offset(page_num));
+static void write_page(Pager *pager, uint32_t page_num, const void *data) {
+    ssize_t written = pwrite(pager->fd, data, PAGE_SIZE, page_offset(page_num));
     if (written != (ssize_t)PAGE_SIZE) {
         die("pwrite");
     }
 }
 
+void pager_flush_all(Pager *pager) {
+    for (uint32_t i = 0; i < pager->num_pages; i++) {
+        CachedPage *entry = &pager->pages[i];
+        if (entry->data != NULL && entry->dirty) {
+            write_page(pager, i, entry->data);
+            entry->dirty = false;
+        }
+    }
+}
+
 void pager_close(Pager *pager) {
     for (uint32_t i = 0; i < PAGER_MAX_PAGES; i++) {
-        free(pager->pages[i]);
+        if (pager->pages[i].pin_count != 0) {
+            pin_bug("page still pinned at close", i);
+        }
+        free(pager->pages[i].data);
     }
     if (close(pager->fd) < 0) {
         die("close");
