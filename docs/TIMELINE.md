@@ -52,6 +52,10 @@ Hours per phase are unchanged; only what goes into some commits moved.
 - **Phase 5** was rewritten to match: commits 14-17 now cover inserting into the parent,
   a small fan-out test build, internal splits and a `.validate` command that checks the
   tree's invariants (kept separate from `.btree` so its exact output stays stable).
+- **Phase 6** puts the pin/unpin discipline in place first (commit 19) and the fixed-size
+  LRU cache second (commit 20). Before eviction existed, the B+tree code kept raw page
+  pointers across other page reads; those had to become pin-safe before any page could be
+  evicted, or the cache commit would have been one large, hard-to-debug change.
 
 ## Commit schedule (all times +01:00)
 
@@ -75,8 +79,8 @@ Hours per phase are unchanged; only what goes into some commits moved.
 | 16 | Sat 2026-10-10 01:28 | 5 | 4 | feat: split internal nodes so the tree can grow past two levels |
 | 17 | Sat 2026-10-10 14:36 | 5 | 4.5 | Added .validate meta command that checks key order, parent pointers and the leaf chain |
 | 18 | Sat 2026-10-10 16:12 | 5 | 2 | Added random insert test checked against a sorted Python list |
-| 19 | Mon 2026-10-12 00:41 | 6 | 3.5 | feat: page cache with fixed frames and dirty page tracking |
-| 20 | Mon 2026-10-12 02:33 | 6 | 4 | feat: LRU eviction with pin counts and configurable cache size |
+| 19 | Mon 2026-10-12 00:41 | 6 | 3.5 | feat: pin counts and dirty page tracking in the pager |
+| 20 | Mon 2026-10-12 02:33 | 6 | 4 | feat: fixed-size page cache with LRU eviction and a --cache-frames option |
 | 21 | Mon 2026-10-12 18:24 | 6 | 2.5 | Added beyond memory test that checks the eviction counter |
 | 22 | Tue 2026-10-13 18:47 | 7 | 3.5 | feat: tokenizer with case-insensitive keywords and quoted strings |
 | 23 | Wed 2026-10-14 00:29 | 7 | 4.5 | feat: recursive descent parser for insert and select with where |

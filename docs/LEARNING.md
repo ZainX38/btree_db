@@ -306,3 +306,72 @@ test.
    Use a simple reference model (a sorted Python list), compare every output against it
    over thousands of random operations, and run an invariant checker after each run. Random
    inputs find the cases nobody thought to write by hand.
+
+## Phase 6: LRU page cache, dirty tracking, pin counts
+
+### What was built
+
+- A pin discipline. `pager_get_page` pins a page, the caller unpins it when done, and
+  anyone who changes a page calls `pager_mark_dirty` while it's pinned. The B+tree code was
+  reworked so it never holds a page pointer while it walks to other pages: it reads what
+  it needs, unpins, and only then follows a child or recurses up to a parent.
+- A fixed-size cache: 64 frames by default, or `--cache-frames N` (at least 4). A lookup
+  scans the frames. On a miss, the pager takes an empty frame, or evicts the least recently
+  used frame that nobody has pinned, writing it back first only if it's dirty.
+- Safety checks: unpinning a page that isn't pinned, marking an unpinned page dirty, every
+  frame being pinned, or anything still pinned at close all abort with a "Pager bug"
+  message, so a mistake fails a test instead of corrupting data.
+- `.stats`, which prints frames, pages, hits, misses, evictions and the peak number of
+  pages pinned at once.
+- The "beyond memory" tests. With 8 frames (32KB), 4,000 random inserts produce 433 pages
+  (1.7MB) and about 4,300 evictions. The data still matches the Python reference exactly,
+  and no operation pins more than 2 pages.
+
+### Key C concepts
+
+- **Dangling pointers.** After a page is evicted, its frame holds a different page. Any old
+  pointer into that frame still "works" in the sense that it points at valid memory, so
+  ASan can't see the bug: the code silently reads or writes the wrong page. Pin counts are
+  the contract that prevents it, and the pager's checks enforce the contract.
+- **Ownership by convention.** C has no destructors, so "every get has a matching unpin"
+  is a rule the code has to follow by hand. Structuring functions as pin, read, unpin, and
+  only then call anything else keeps the rule easy to check by eye.
+- **`abort()` vs `exit()`.** `abort()` is for bugs: it stops immediately and gives a core
+  dump or ASan report. `exit()` is for expected failures, like a bad command-line argument.
+- **Fixed-width format macros.** `uint64_t` isn't always `unsigned long`, so `printf` needs
+  `PRIu64` from `<inttypes.h>` to print it portably.
+- **A logical clock for LRU.** Each access stamps the frame with an incrementing counter.
+  The smallest stamp among unpinned frames is the least recently used, without having to
+  keep a linked list in sync.
+
+### Trickiest part
+
+Making the B+tree pin-safe. Before the cache existed, code like the split kept pointers to
+the old leaf, the new leaf and the parent while also walking down to find max keys. Every
+one of those walks could now evict a page that's still being used. The fix was to restructure
+each function into phases: work out everything it needs from other pages first, then pin
+only the pages it modifies, write, mark dirty, and unpin before recursing. The pager's
+"still pinned at close" check, plus tests with a 4-frame cache, made any leftover mistake
+show up immediately.
+
+### Interview questions
+
+1. **Why does a database need its own page cache when the OS already caches files?**
+   The database knows which pages are in use (pinned) and which changes must reach disk in
+   a certain order (needed for the WAL). The OS cache can't evict by those rules, and it
+   can't promise a dirty page won't be written before its log record.
+2. **What does pinning protect against?**
+   It stops a page from being evicted while someone holds a pointer to its frame. Without
+   it, the frame could be reused for another page, and the old pointer would silently read
+   or write the wrong data.
+3. **Why write back only dirty pages?**
+   Clean pages already match the file, so writing them is wasted I/O. A read-only session
+   writes nothing at all, which a test checks.
+4. **What's the downside of LRU, and what do real databases do instead?**
+   One big scan pushes every useful page out of the cache ("cache flooding"). Systems like
+   PostgreSQL use a clock-sweep with usage counts, and others use LRU-K or 2Q, which favour
+   pages used more than once.
+5. **How would you test that the database works on data bigger than memory?**
+   Make memory tiny instead of making the data huge. With an 8-frame cache, a few thousand
+   rows are already 50 times bigger than the cache. Then assert that evictions actually
+   happened (`.stats`), and compare every row against a reference.

@@ -15,6 +15,7 @@ PROMPT = "db > "
 # Sanitizer builds are slow; this only exists so a hung REPL fails the test.
 TIMEOUT_SECONDS = 120
 
+PAGE_SIZE_BYTES = 4096
 LEAF_NODE_MAX_CELLS = 13
 # A cache far smaller than the test databases, so pages are evicted constantly.
 TINY_CACHE_FRAMES = 8

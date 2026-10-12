@@ -4,6 +4,7 @@
  * Lines starting with '.' are meta commands handled here; everything else is
  * prepared into a Statement by the parser and run by the executor.
  */
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +51,16 @@ static bool read_input(InputBuffer *input) {
     return true;
 }
 
+/* One "name: value" per line so tests can parse it into a dict. */
+static void print_cache_stats(const Pager *pager) {
+    printf("frames: %u\n", pager->num_frames);
+    printf("pages: %u\n", pager->num_pages);
+    printf("hits: %" PRIu64 "\n", pager->hits);
+    printf("misses: %" PRIu64 "\n", pager->misses);
+    printf("evictions: %" PRIu64 "\n", pager->evictions);
+    printf("peak pinned: %u\n", pager->peak_pinned_pages);
+}
+
 static MetaCommandResult do_meta_command(const InputBuffer *input, Table *table) {
     if (strcmp(input->buffer, ".exit") == 0) {
         return META_COMMAND_EXIT;
@@ -61,6 +72,10 @@ static MetaCommandResult do_meta_command(const InputBuffer *input, Table *table)
     }
     if (strcmp(input->buffer, ".validate") == 0) {
         validate_tree(table);
+        return META_COMMAND_SUCCESS;
+    }
+    if (strcmp(input->buffer, ".stats") == 0) {
+        print_cache_stats(table->pager);
         return META_COMMAND_SUCCESS;
     }
     return META_COMMAND_UNRECOGNIZED;
