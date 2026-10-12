@@ -16,6 +16,8 @@ PROMPT = "db > "
 TIMEOUT_SECONDS = 120
 
 LEAF_NODE_MAX_CELLS = 13
+# A cache far smaller than the test databases, so pages are evicted constantly.
+TINY_CACHE_FRAMES = 8
 
 
 def find_binary(env_var, default):
@@ -25,16 +27,17 @@ def find_binary(env_var, default):
     return str(path)
 
 
-def make_runner(binary, db_path):
+def make_runner(binary, db_path, cache_frames=None):
     """Return run(commands) -> stdout lines.
 
     Each call is a fresh process on the same database file, so calling it twice
     in one test simulates a restart.
     """
+    args = [binary] + ([] if cache_frames is None else ["--cache-frames", str(cache_frames)])
 
     def run(commands):
         proc = subprocess.run(
-            [binary, str(db_path)],
+            args + [str(db_path)],
             input="".join(c + "\n" for c in commands),
             capture_output=True,
             text=True,
@@ -66,6 +69,17 @@ def repl(db_bin, db_path):
 @pytest.fixture
 def small_fanout_repl(db_path):
     return make_runner(find_binary("BTREE_DB_SMALL_FANOUT_BIN", SMALL_FANOUT_BIN), db_path)
+
+
+@pytest.fixture
+def tiny_cache_repl(db_bin, db_path):
+    return make_runner(db_bin, db_path, TINY_CACHE_FRAMES)
+
+
+@pytest.fixture
+def tiny_cache_small_fanout_repl(db_path):
+    binary = find_binary("BTREE_DB_SMALL_FANOUT_BIN", SMALL_FANOUT_BIN)
+    return make_runner(binary, db_path, TINY_CACHE_FRAMES)
 
 
 def select_rows(repl):

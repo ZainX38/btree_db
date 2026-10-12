@@ -115,13 +115,47 @@ static void run_statement(InputBuffer *input, Table *table) {
     free(original);
 }
 
+typedef struct {
+    const char *filename;
+    uint32_t cache_frames;
+} Options;
+
+/* Accepts only plain decimal digits, so "-1" or "8x" are rejected rather
+ * than silently becoming a huge or truncated number. */
+static bool parse_frame_count(const char *text, uint32_t *out) {
+    if (*text == '\0' || strspn(text, "0123456789") != strlen(text)) {
+        return false;
+    }
+    unsigned long value = strtoul(text, NULL, 10);
+    if (value > PAGER_MAX_FRAMES) {
+        return false;
+    }
+    *out = (uint32_t)value;
+    return true;
+}
+
+/* Usage: btree_db [--cache-frames N] <database file> */
+static bool parse_options(int argc, char *argv[], Options *options) {
+    options->cache_frames = PAGER_DEFAULT_FRAMES;
+    if (argc == 2) {
+        options->filename = argv[1];
+        return true;
+    }
+    if (argc == 4 && strcmp(argv[1], "--cache-frames") == 0) {
+        options->filename = argv[3];
+        return parse_frame_count(argv[2], &options->cache_frames);
+    }
+    return false;
+}
+
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <database file>\n", argv[0]);
+    Options options;
+    if (!parse_options(argc, argv, &options)) {
+        fprintf(stderr, "Usage: %s [--cache-frames N] <database file>\n", argv[0]);
         return EXIT_FAILURE;
     }
     InputBuffer input = {0};
-    Table *table = db_open(argv[1]);
+    Table *table = db_open(options.filename, options.cache_frames);
 
     for (;;) {
         print_prompt();

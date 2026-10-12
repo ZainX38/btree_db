@@ -86,7 +86,7 @@ typedef struct {
     uint32_t root_page_num;
 } Table;
 
-Table *db_open(const char *filename);
+Table *db_open(const char *filename, uint32_t cache_frames);
 /* Writes every cached page back to disk, then releases the table. */
 void db_close(Table *table);
 
