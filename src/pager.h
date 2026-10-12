@@ -47,9 +47,13 @@ typedef struct {
     /* Ticks once per get_page; comparing last_used values gives LRU order
      * without keeping a linked list in sync. */
     uint64_t clock;
+    /* Counters reported by the .stats command, which tests use to prove
+     * eviction really happens and that pins stay few. */
     uint64_t hits;
     uint64_t misses;
     uint64_t evictions;
+    uint32_t pinned_pages; /* frames with pin_count > 0 right now */
+    uint32_t peak_pinned_pages;
 } Pager;
 
 Pager *pager_open(const char *filename, uint32_t num_frames);

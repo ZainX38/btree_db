@@ -146,6 +146,12 @@ void *pager_get_page(Pager *pager, uint32_t page_num) {
             pager->num_pages = page_num + 1;
         }
     }
+    if (frame->pin_count == 0) {
+        pager->pinned_pages++;
+        if (pager->pinned_pages > pager->peak_pinned_pages) {
+            pager->peak_pinned_pages = pager->pinned_pages;
+        }
+    }
     frame->pin_count++;
     frame->last_used = ++pager->clock;
     return frame->data;
@@ -157,6 +163,9 @@ void pager_unpin(Pager *pager, uint32_t page_num) {
         pin_bug("unpin of a page that isn't pinned", page_num);
     }
     frame->pin_count--;
+    if (frame->pin_count == 0) {
+        pager->pinned_pages--;
+    }
 }
 
 void pager_mark_dirty(Pager *pager, uint32_t page_num) {
