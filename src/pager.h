@@ -6,6 +6,10 @@
  * above it asks for "page N" and gets back a 4KB buffer in memory; the pager
  * decides when bytes actually move between that buffer and disk.
  *
+ * Pages live in a fixed number of frames. When every frame is in use, the
+ * least recently used unpinned frame is evicted (written back first only if
+ * it is dirty), so the database can be far bigger than the cache.
+ *
  * Usage rules, which every caller follows:
  *  - pager_get_page() pins the page. The pointer stays valid until the
  *    matching pager_unpin(); after that the page may be evicted.
@@ -18,23 +22,37 @@
 #include <stdint.h>
 
 #define PAGE_SIZE 4096u
-/* Every page stays in memory until the cache arrives, so this caps the file
- * at 8MB. Deep test trees (small fan-out) need a few hundred pages. */
-#define PAGER_MAX_PAGES 2048u
+#define PAGER_DEFAULT_FRAMES 64u
+/* No operation pins more than two pages at once; four leaves headroom. */
+#define PAGER_MIN_FRAMES 4u
+/* Upper bound for --cache-frames (4GB of cache), mostly to reject typos. */
+#define PAGER_MAX_FRAMES (1u << 20)
+/* Marks an empty frame. Also caps page numbers, so the file can hold up to
+ * UINT32_MAX - 1 pages (about 16TB). */
+#define PAGER_NO_PAGE UINT32_MAX
 
 typedef struct {
-    void *data; /* NULL until the page is first requested */
+    uint32_t page_num; /* PAGER_NO_PAGE while the frame is empty */
     uint32_t pin_count;
     bool dirty;
-} CachedPage;
+    uint64_t last_used; /* pager clock value at the most recent get_page */
+    void *data;
+} Frame;
 
 typedef struct {
     int fd;
     uint32_t num_pages; /* pages that exist on disk or have been handed out */
-    CachedPage pages[PAGER_MAX_PAGES];
+    uint32_t num_frames;
+    Frame *frames;
+    /* Ticks once per get_page; comparing last_used values gives LRU order
+     * without keeping a linked list in sync. */
+    uint64_t clock;
+    uint64_t hits;
+    uint64_t misses;
+    uint64_t evictions;
 } Pager;
 
-Pager *pager_open(const char *filename);
+Pager *pager_open(const char *filename, uint32_t num_frames);
 /* Returns the page's buffer and pins it. */
 void *pager_get_page(Pager *pager, uint32_t page_num);
 void pager_unpin(Pager *pager, uint32_t page_num);
@@ -45,7 +63,7 @@ void pager_mark_dirty(Pager *pager, uint32_t page_num);
 uint32_t pager_get_unused_page_num(const Pager *pager);
 /* Writes every dirty page back to the file. */
 void pager_flush_all(Pager *pager);
-/* Frees every cached page and closes the file; does not flush. */
+/* Frees the cache and closes the file; does not flush. */
 void pager_close(Pager *pager);
 
 #endif
