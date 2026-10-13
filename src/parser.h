@@ -4,10 +4,10 @@
 /*
  * Turns one line of input into a Statement.
  *
- * This is a deliberately simple whitespace-split parser
- * ("insert <id> <username> <email>" / "select") so the storage layers can be
- * built and tested first. It gets replaced by a tokenizer and a recursive
- * descent SQL parser in phase 7.
+ * The grammar is still the short REPL form ("insert <id> <username> <email>"
+ * / "select"), but it now works on tokens, so keywords are case-insensitive
+ * and strings can be quoted to hold spaces. A recursive descent parser for
+ * real SQL replaces it next.
  */
 
 #include "row.h"
@@ -27,7 +27,6 @@ typedef enum {
     PREPARE_STRING_TOO_LONG,
 } PrepareResult;
 
-/* Note: tokenizes `input` in place, so the caller's buffer is modified. */
-PrepareResult prepare_statement(char *input, Statement *statement);
+PrepareResult prepare_statement(const char *input, Statement *statement);
 
 #endif
