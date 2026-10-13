@@ -113,21 +113,14 @@ static void report_execute_result(ExecuteResult result, const Statement *stateme
     }
 }
 
-static void run_statement(InputBuffer *input, Table *table) {
-    /* prepare_statement tokenizes in place, so keep a copy for error messages. */
-    char *original = strdup(input->buffer);
-    if (original == NULL) {
-        perror("strdup");
-        exit(EXIT_FAILURE);
-    }
+static void run_statement(const InputBuffer *input, Table *table) {
     Statement statement;
     PrepareResult prepared = prepare_statement(input->buffer, &statement);
     if (prepared != PREPARE_SUCCESS) {
-        report_prepare_error(prepared, original);
+        report_prepare_error(prepared, input->buffer);
     } else {
         report_execute_result(execute_statement(&statement, table), &statement);
     }
-    free(original);
 }
 
 typedef struct {

@@ -1,23 +1,29 @@
 #include "parser.h"
 
-#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define WHITESPACE " \t"
+#include "tokenizer.h"
+
+/* Big enough for a 32-bit id written out in full; anything longer is out of
+ * range anyway, and checking first keeps the copy below bounded. */
+#define ID_TEXT_MAX_LEN 10
+/* Token counts include the final TOKEN_END. */
+#define INSERT_TOKEN_COUNT 5 /* insert id username email */
+#define SELECT_TOKEN_COUNT 2 /* select */
 
 /* strtoul alone accepts "-1" (wrapping it to a huge number) and " 12abc", so
  * we check every character is a digit and the value fits in 32 bits. */
-static int parse_id(const char *text, uint32_t *out) {
-    if (*text == '\0') {
+static int parse_id(const Token *token, uint32_t *out) {
+    if (token->type != TOKEN_WORD || token->length == 0 || token->length > ID_TEXT_MAX_LEN) {
         return -1;
     }
-    for (const char *p = text; *p != '\0'; p++) {
-        if (!isdigit((unsigned char)*p)) {
-            return -1;
-        }
+    if (strspn(token->start, "0123456789") < token->length) {
+        return -1;
     }
+    char text[ID_TEXT_MAX_LEN + 1];
+    token_copy_text(token, text);
     errno = 0;
     unsigned long value = strtoul(text, NULL, 10);
     if (errno == ERANGE || value > UINT32_MAX) {
@@ -27,41 +33,54 @@ static int parse_id(const char *text, uint32_t *out) {
     return 0;
 }
 
-static PrepareResult prepare_insert(Statement *statement) {
-    /* strtok continues from where prepare_statement left off. */
-    char *id_text = strtok(NULL, WHITESPACE);
-    char *username = strtok(NULL, WHITESPACE);
-    char *email = strtok(NULL, WHITESPACE);
-    if (id_text == NULL || username == NULL || email == NULL || strtok(NULL, WHITESPACE)) {
+static bool is_value(const Token *token) {
+    return token->type == TOKEN_WORD || token->type == TOKEN_STRING;
+}
+
+static int copy_string(const Token *token, char *dest, size_t max_len) {
+    if (token_text_length(token) > max_len) {
+        return -1;
+    }
+    token_copy_text(token, dest);
+    return 0;
+}
+
+/* insert <id> <username> <email>, where the strings may be quoted. */
+static PrepareResult prepare_insert(const TokenList *list, Statement *statement) {
+    const Token *t = list->tokens;
+    if (list->count != INSERT_TOKEN_COUNT || !is_value(&t[1]) || !is_value(&t[2]) ||
+        !is_value(&t[3])) {
         return PREPARE_SYNTAX_ERROR;
     }
-    if (parse_id(id_text, &statement->row_to_insert.id) != 0) {
+    Row *row = &statement->row_to_insert;
+    if (parse_id(&t[1], &row->id) != 0) {
         return PREPARE_INVALID_ID;
     }
-    if (strlen(username) > USERNAME_MAX_LEN || strlen(email) > EMAIL_MAX_LEN) {
+    if (copy_string(&t[2], row->username, USERNAME_MAX_LEN) != 0 ||
+        copy_string(&t[3], row->email, EMAIL_MAX_LEN) != 0) {
         return PREPARE_STRING_TOO_LONG;
     }
     statement->type = STATEMENT_INSERT;
-    strcpy(statement->row_to_insert.username, username);
-    strcpy(statement->row_to_insert.email, email);
     return PREPARE_SUCCESS;
 }
 
-PrepareResult prepare_statement(char *input, Statement *statement) {
+PrepareResult prepare_statement(const char *input, Statement *statement) {
     memset(statement, 0, sizeof(*statement));
-    char *keyword = strtok(input, WHITESPACE);
-    if (keyword == NULL) {
+    TokenList list;
+    size_t error_column;
+    if (tokenize(input, &list, &error_column) != TOKENIZE_SUCCESS) {
+        return PREPARE_SYNTAX_ERROR;
+    }
+    const Token *first = &list.tokens[0];
+    if (first->type != TOKEN_KEYWORD) {
         return PREPARE_UNRECOGNIZED_STATEMENT;
     }
-    if (strcmp(keyword, "insert") == 0) {
-        return prepare_insert(statement);
+    if (first->keyword == KEYWORD_INSERT) {
+        return prepare_insert(&list, statement);
     }
-    if (strcmp(keyword, "select") == 0) {
-        if (strtok(NULL, WHITESPACE) != NULL) {
-            return PREPARE_SYNTAX_ERROR;
-        }
-        statement->type = STATEMENT_SELECT;
-        return PREPARE_SUCCESS;
+    if (list.count != SELECT_TOKEN_COUNT) {
+        return PREPARE_SYNTAX_ERROR;
     }
-    return PREPARE_UNRECOGNIZED_STATEMENT;
+    statement->type = STATEMENT_SELECT;
+    return PREPARE_SUCCESS;
 }
