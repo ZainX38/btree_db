@@ -17,6 +17,10 @@ typedef struct {
 static const KeywordEntry KEYWORDS[] = {
     {"insert", KEYWORD_INSERT},
     {"select", KEYWORD_SELECT},
+    {"into", KEYWORD_INTO},
+    {"values", KEYWORD_VALUES},
+    {"from", KEYWORD_FROM},
+    {"where", KEYWORD_WHERE},
 };
 
 static bool is_symbol_char(char c) {

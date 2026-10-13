@@ -29,6 +29,10 @@ typedef enum {
     KEYWORD_NONE,
     KEYWORD_INSERT,
     KEYWORD_SELECT,
+    KEYWORD_INTO,
+    KEYWORD_VALUES,
+    KEYWORD_FROM,
+    KEYWORD_WHERE,
 } Keyword;
 
 typedef struct {
