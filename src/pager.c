@@ -64,6 +64,8 @@ Pager *pager_open(const char *filename, uint32_t num_frames) {
 
     Pager *pager = xcalloc(1, sizeof(Pager));
     pager->fd = fd;
+    pager->wal = wal_open(filename);
+    pager->committed_wal_size = pager->wal->size;
     pager->num_pages = (uint32_t)(st.st_size / PAGE_SIZE);
     pager->num_frames = num_frames;
     pager->frames = xcalloc(num_frames, sizeof(Frame));
@@ -121,6 +123,12 @@ static Frame *claim_frame(Pager *pager) {
         fprintf(stderr, "Pager bug: all %u cache frames are pinned.\n", pager->num_frames);
         abort();
     }
+    /* The log must hold every version a commit could need, including pages
+     * that leave the cache halfway through a statement. */
+    if (victim->unlogged) {
+        wal_append_page(pager->wal, victim->page_num, victim->data);
+        victim->unlogged = false;
+    }
     if (victim->dirty) {
         write_page(pager, victim->page_num, victim->data);
     }
@@ -175,6 +183,26 @@ void pager_mark_dirty(Pager *pager, uint32_t page_num) {
         pin_bug("page marked dirty while not pinned", page_num);
     }
     frame->dirty = true;
+    frame->unlogged = true;
+}
+
+void pager_commit(Pager *pager) {
+    bool changed = false;
+    for (uint32_t i = 0; i < pager->num_frames; i++) {
+        Frame *frame = &pager->frames[i];
+        if (frame->unlogged) {
+            wal_append_page(pager->wal, frame->page_num, frame->data);
+            frame->unlogged = false;
+            changed = true;
+        }
+    }
+    /* Evicted pages may already be in the log even if no cached page is
+     * still unlogged, so compare against the log's size instead. */
+    if (changed || pager->wal->size > pager->committed_wal_size) {
+        wal_append_commit(pager->wal);
+        wal_sync(pager->wal);
+        pager->committed_wal_size = pager->wal->size;
+    }
 }
 
 uint32_t pager_get_unused_page_num(const Pager *pager) {
@@ -203,6 +231,7 @@ void pager_close(Pager *pager) {
         free(pager->frames[i].data);
     }
     free(pager->frames);
+    wal_close(pager->wal);
     if (close(pager->fd) < 0) {
         die("close");
     }

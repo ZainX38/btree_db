@@ -738,6 +738,7 @@ Table *db_open(const char *filename, uint32_t cache_frames) {
         set_node_root(root, true);
         pager_mark_dirty(table->pager, ROOT_PAGE_NUM);
         pager_unpin(table->pager, ROOT_PAGE_NUM);
+        pager_commit(table->pager);
     }
     return table;
 }
