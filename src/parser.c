@@ -17,6 +17,7 @@ typedef struct {
     /* Only the first failure is kept, since later ones are usually knock-on
      * effects of it. */
     PrepareResult result;
+    ParseError *error;
 } Parser;
 
 static const Token *peek(const Parser *p) {
@@ -32,11 +33,18 @@ static const Token *advance(Parser *p) {
     return token;
 }
 
-static bool fail(Parser *p, PrepareResult result) {
+static bool fail_at(Parser *p, const Token *token, PrepareResult result, const char *message) {
     if (p->result == PREPARE_SUCCESS) {
         p->result = result;
+        p->error->column = token->column;
+        p->error->message = message;
     }
     return false;
+}
+
+/* Most errors are about the token the parser is looking at right now. */
+static bool fail(Parser *p, PrepareResult result, const char *message) {
+    return fail_at(p, peek(p), result, message);
 }
 
 static bool accept_keyword(Parser *p, Keyword keyword) {
@@ -55,12 +63,12 @@ static bool accept_symbol(Parser *p, const char *symbol) {
     return false;
 }
 
-static bool expect_keyword(Parser *p, Keyword keyword) {
-    return accept_keyword(p, keyword) || fail(p, PREPARE_SYNTAX_ERROR);
+static bool expect_keyword(Parser *p, Keyword keyword, const char *message) {
+    return accept_keyword(p, keyword) || fail(p, PREPARE_SYNTAX_ERROR, message);
 }
 
-static bool expect_symbol(Parser *p, const char *symbol) {
-    return accept_symbol(p, symbol) || fail(p, PREPARE_SYNTAX_ERROR);
+static bool expect_symbol(Parser *p, const char *symbol, const char *message) {
+    return accept_symbol(p, symbol) || fail(p, PREPARE_SYNTAX_ERROR, message);
 }
 
 static bool word_equals(const Token *token, const char *word) {
@@ -74,7 +82,7 @@ static bool is_value(const Token *token) {
 
 static const Token *expect_value(Parser *p) {
     if (!is_value(peek(p))) {
-        fail(p, PREPARE_SYNTAX_ERROR);
+        fail(p, PREPARE_SYNTAX_ERROR, "expected a value");
         return NULL;
     }
     return advance(p);
@@ -89,14 +97,14 @@ static bool parse_id(Parser *p, uint32_t *out) {
     }
     if (token->type != TOKEN_WORD || token->length > ID_TEXT_MAX_LEN ||
         strspn(token->start, "0123456789") < token->length) {
-        return fail(p, PREPARE_INVALID_ID);
+        return fail_at(p, token, PREPARE_INVALID_ID, NULL);
     }
     char text[ID_TEXT_MAX_LEN + 1];
     token_copy_text(token, text);
     errno = 0;
     unsigned long value = strtoul(text, NULL, 10);
     if (errno == ERANGE || value > UINT32_MAX) {
-        return fail(p, PREPARE_INVALID_ID);
+        return fail_at(p, token, PREPARE_INVALID_ID, NULL);
     }
     *out = (uint32_t)value;
     return true;
@@ -108,7 +116,7 @@ static bool parse_string(Parser *p, char *dest, size_t max_len) {
         return false;
     }
     if (token_text_length(token) > max_len) {
-        return fail(p, PREPARE_STRING_TOO_LONG);
+        return fail_at(p, token, PREPARE_STRING_TOO_LONG, NULL);
     }
     token_copy_text(token, dest);
     return true;
@@ -117,16 +125,17 @@ static bool parse_string(Parser *p, char *dest, size_t max_len) {
 /* There is only one table, but naming it keeps the syntax honest SQL. */
 static bool parse_table_name(Parser *p) {
     if (!word_equals(peek(p), TABLE_NAME)) {
-        return fail(p, PREPARE_SYNTAX_ERROR);
+        return fail(p, PREPARE_SYNTAX_ERROR, "expected the table name '" TABLE_NAME "'");
     }
     advance(p);
     return true;
 }
 
 static bool parse_row_values(Parser *p, Row *row, const char *separator) {
-    return parse_id(p, &row->id) && (separator == NULL || expect_symbol(p, separator)) &&
+    return parse_id(p, &row->id) &&
+           (separator == NULL || expect_symbol(p, separator, "expected ','")) &&
            parse_string(p, row->username, USERNAME_MAX_LEN) &&
-           (separator == NULL || expect_symbol(p, separator)) &&
+           (separator == NULL || expect_symbol(p, separator, "expected ','")) &&
            parse_string(p, row->email, EMAIL_MAX_LEN);
 }
 
@@ -136,8 +145,9 @@ static bool parse_insert(Parser *p, Statement *statement) {
     if (!accept_keyword(p, KEYWORD_INTO)) {
         return parse_row_values(p, row, NULL);
     }
-    return parse_table_name(p) && expect_keyword(p, KEYWORD_VALUES) && expect_symbol(p, "(") &&
-           parse_row_values(p, row, ",") && expect_symbol(p, ")");
+    return parse_table_name(p) && expect_keyword(p, KEYWORD_VALUES, "expected VALUES") &&
+           expect_symbol(p, "(", "expected '('") && parse_row_values(p, row, ",") &&
+           expect_symbol(p, ")", "expected ')'");
 }
 
 static bool parse_column(Parser *p, Column *column) {
@@ -152,7 +162,7 @@ static bool parse_column(Parser *p, Column *column) {
             return true;
         }
     }
-    return fail(p, PREPARE_SYNTAX_ERROR);
+    return fail(p, PREPARE_SYNTAX_ERROR, "expected a column (id, username or email)");
 }
 
 static bool parse_compare_op(Parser *p, CompareOp *op) {
@@ -167,7 +177,7 @@ static bool parse_compare_op(Parser *p, CompareOp *op) {
             return true;
         }
     }
-    return fail(p, PREPARE_SYNTAX_ERROR);
+    return fail(p, PREPARE_SYNTAX_ERROR, "expected a comparison (=, !=, <, <=, >, >=)");
 }
 
 static bool parse_where(Parser *p, WhereClause *where) {
@@ -184,7 +194,8 @@ static bool parse_where(Parser *p, WhereClause *where) {
 
 static bool parse_select(Parser *p, Statement *statement) {
     statement->type = STATEMENT_SELECT;
-    if (accept_symbol(p, "*") && !(expect_keyword(p, KEYWORD_FROM) && parse_table_name(p))) {
+    if (accept_symbol(p, "*") &&
+        !(expect_keyword(p, KEYWORD_FROM, "expected FROM") && parse_table_name(p))) {
         return false;
     }
     if (accept_keyword(p, KEYWORD_WHERE)) {
@@ -200,23 +211,30 @@ static bool parse_statement(Parser *p, Statement *statement) {
     } else if (accept_keyword(p, KEYWORD_SELECT)) {
         parsed = parse_select(p, statement);
     } else {
-        return fail(p, PREPARE_UNRECOGNIZED_STATEMENT);
+        return fail(p, PREPARE_UNRECOGNIZED_STATEMENT, NULL);
     }
     if (!parsed) {
         return false;
     }
     accept_symbol(p, ";");
-    return peek(p)->type == TOKEN_END || fail(p, PREPARE_SYNTAX_ERROR);
+    return peek(p)->type == TOKEN_END ||
+           fail(p, PREPARE_SYNTAX_ERROR, "expected end of statement");
 }
 
-PrepareResult prepare_statement(const char *input, Statement *statement) {
+static const char *tokenize_error_message(TokenizeResult result) {
+    return result == TOKENIZE_UNTERMINATED_STRING ? "string is never closed" : "too many tokens";
+}
+
+PrepareResult prepare_statement(const char *input, Statement *statement, ParseError *error) {
     memset(statement, 0, sizeof(*statement));
+    memset(error, 0, sizeof(*error));
     TokenList list;
-    size_t error_column;
-    if (tokenize(input, &list, &error_column) != TOKENIZE_SUCCESS) {
+    TokenizeResult tokenized = tokenize(input, &list, &error->column);
+    if (tokenized != TOKENIZE_SUCCESS) {
+        error->message = tokenize_error_message(tokenized);
         return PREPARE_SYNTAX_ERROR;
     }
-    Parser parser = {.list = &list, .pos = 0, .result = PREPARE_SUCCESS};
+    Parser parser = {.list = &list, .pos = 0, .result = PREPARE_SUCCESS, .error = error};
     parse_statement(&parser, statement);
     return parser.result;
 }

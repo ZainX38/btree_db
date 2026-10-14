@@ -17,6 +17,7 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "row.h"
 
@@ -49,6 +50,13 @@ typedef struct {
     WhereClause where; /* only meaningful for STATEMENT_SELECT */
 } Statement;
 
+/* Where parsing stopped and why. `message` is only set for syntax errors; the
+ * other failures already say what went wrong. */
+typedef struct {
+    size_t column; /* 1-based */
+    const char *message;
+} ParseError;
+
 typedef enum {
     PREPARE_SUCCESS,
     PREPARE_SYNTAX_ERROR,
@@ -57,6 +65,6 @@ typedef enum {
     PREPARE_STRING_TOO_LONG,
 } PrepareResult;
 
-PrepareResult prepare_statement(const char *input, Statement *statement);
+PrepareResult prepare_statement(const char *input, Statement *statement, ParseError *error);
 
 #endif

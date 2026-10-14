@@ -52,7 +52,12 @@ def test_largest_id_is_accepted(repl):
 
 def test_wrong_number_of_fields_is_a_syntax_error(repl):
     out = repl(["insert 1 bob", "insert 1 bob b@x extra", "select extra", ".exit"])
-    assert out[:3] == [PROMPT + "Syntax error. Could not parse statement."] * 3
+    errors = [line for line in out if "Syntax error" in line]
+    assert errors == [
+        PROMPT + "Syntax error at column 13: expected a value.",
+        PROMPT + "Syntax error at column 18: expected end of statement.",
+        PROMPT + "Syntax error at column 8: expected end of statement.",
+    ]
 
 
 def test_select_on_empty_table_prints_nothing(repl):

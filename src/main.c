@@ -16,6 +16,8 @@
 #include "parser.h"
 
 #define PROMPT "db > "
+/* Lines the echoed input and the caret under it up with each other. */
+#define ERROR_INDENT "  "
 
 /* getline() owns and grows the buffer, so we keep it across iterations
  * instead of allocating a new one per line. */
@@ -81,12 +83,25 @@ static MetaCommandResult do_meta_command(const InputBuffer *input, Table *table)
     return META_COMMAND_UNRECOGNIZED;
 }
 
+/* Echoes the input with a caret under the failing column. Tabs are printed as
+ * spaces because the column counts characters, and a tab would push the input
+ * further right than the caret line. */
+static void print_error_caret(const char *input, size_t column) {
+    printf("%s", ERROR_INDENT);
+    for (const char *c = input; *c != '\0'; c++) {
+        putchar(*c == '\t' ? ' ' : *c);
+    }
+    printf("\n%s%*s^\n", ERROR_INDENT, (int)(column - 1), "");
+}
+
 /* Each failure gets its own message so tests (and users) can tell exactly
  * which rule an input broke. */
-static void report_prepare_error(PrepareResult result, const char *input) {
+static void report_prepare_error(PrepareResult result, const ParseError *error,
+                                 const char *input) {
     switch (result) {
     case PREPARE_SYNTAX_ERROR:
-        printf("Syntax error. Could not parse statement.\n");
+        printf("Syntax error at column %zu: %s.\n", error->column, error->message);
+        print_error_caret(input, error->column);
         break;
     case PREPARE_INVALID_ID:
         printf("ID must be an integer between 0 and %u.\n", UINT32_MAX);
@@ -115,9 +130,10 @@ static void report_execute_result(ExecuteResult result, const Statement *stateme
 
 static void run_statement(const InputBuffer *input, Table *table) {
     Statement statement;
-    PrepareResult prepared = prepare_statement(input->buffer, &statement);
+    ParseError error;
+    PrepareResult prepared = prepare_statement(input->buffer, &statement, &error);
     if (prepared != PREPARE_SUCCESS) {
-        report_prepare_error(prepared, input->buffer);
+        report_prepare_error(prepared, &error, input->buffer);
     } else {
         report_execute_result(execute_statement(&statement, table), &statement);
     }
