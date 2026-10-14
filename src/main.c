@@ -135,7 +135,10 @@ static void run_statement(const InputBuffer *input, Table *table) {
     if (prepared != PREPARE_SUCCESS) {
         report_prepare_error(prepared, &error, input->buffer);
     } else {
-        report_execute_result(execute_statement(&statement, table), &statement);
+        ExecuteResult result = execute_statement(&statement, table);
+        /* Only report success once the change is safely in the log. */
+        pager_commit(table->pager);
+        report_execute_result(result, &statement);
     }
 }
 
