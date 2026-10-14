@@ -1,6 +1,5 @@
 from conftest import PROMPT, select_rows
 
-SYNTAX_ERROR = "Syntax error. Could not parse statement."
 MAX_TOKENS = 32
 
 
@@ -41,12 +40,14 @@ def test_extra_whitespace_and_tabs_are_ignored(repl):
 
 def test_unterminated_string_is_a_syntax_error(repl):
     out = repl(["insert 1 'amy a@x", "select", ".exit"])
-    assert out[:2] == [PROMPT + SYNTAX_ERROR, PROMPT + "Executed."]
+    assert out[0] == PROMPT + "Syntax error at column 10: string is never closed."
+    assert out[3] == PROMPT + "Executed."
 
 
 def test_too_many_tokens_is_a_syntax_error(repl):
     out = repl(["select" + " x" * MAX_TOKENS, ".exit"])
-    assert out[0] == PROMPT + SYNTAX_ERROR
+    # Token 33 is the last "x", at column 6 + 2 * 31 + 2.
+    assert out[0] == PROMPT + "Syntax error at column 70: too many tokens."
 
 
 def test_escaped_quotes_count_once_towards_the_length_limit(repl):

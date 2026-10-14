@@ -56,6 +56,10 @@ Hours per phase are unchanged; only what goes into some commits moved.
   LRU cache second (commit 20). Before eviction existed, the B+tree code kept raw page
   pointers across other page reads; those had to become pin-safe before any page could be
   evicted, or the cache commit would have been one large, hard-to-debug change.
+- **Phase 7** keeps the short REPL forms (`insert 1 amy a@x`, `select`) next to the SQL
+  ones. Commit 22 moves the old grammar onto the tokenizer so it can be tested on its own,
+  and keeping the short forms afterwards means the earlier tests didn't have to be rewritten.
+  Commit 23 also makes `where id ...` seek through the tree instead of scanning every leaf.
 
 ## Commit schedule (all times +01:00)
 

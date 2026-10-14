@@ -375,3 +375,75 @@ show up immediately.
    Make memory tiny instead of making the data huge. With an 8-frame cache, a few thousand
    rows are already 50 times bigger than the cache. Then assert that evictions actually
    happened (`.stats`), and compare every row against a reference.
+
+## Phase 7: Tokenizer and recursive descent parser
+
+### What was built
+
+- A tokenizer that splits a line into keywords, words, quoted strings and symbols. Keywords
+  are case-insensitive, strings use `'...'` with `''` for a quote inside them, and every
+  token records its column. Tokens point back into the input, so nothing is copied or
+  allocated until a value is actually stored.
+- A recursive descent parser with one function per grammar rule, for
+  `insert into users values (1, 'amy', 'a@x')` and
+  `select * from users where <column> <op> <value>`, with `=`, `!=`, `<`, `<=`, `>`, `>=`
+  on `id`, `username` or `email`. The short REPL forms still work.
+- `where` on `id` uses the tree: a lower bound starts the scan with one descent
+  (`table_find`) instead of at the first leaf, and an upper bound stops the scan as soon as
+  it's passed. Conditions on the string columns filter a full scan.
+- Syntax errors name the column and what was expected, then echo the input with a caret
+  under the problem. Tests check the exact column for every kind of mistake.
+
+### Key C concepts
+
+- **Pointer plus length instead of NUL-terminated copies.** A token is `start` and
+  `length` into the input line. That means `strncasecmp` and `strncmp` instead of the plain
+  versions, and remembering that `token->start` is *not* a string on its own.
+- **`const` as a promise.** The old parser used `strtok`, which writes NULs into the
+  caller's buffer, so `main` had to `strdup` the line just to print it in error messages.
+  The new `prepare_statement` takes a `const char *`, and the copy is gone.
+- **Static lookup tables.** Keywords, column names and operators are small `static const`
+  arrays of structs, walked with `sizeof(array) / sizeof(array[0])`. Adding a keyword is
+  one line, not another `if`.
+- **Short-circuit `&&` as control flow.** Each parse function returns `bool`, so a rule
+  reads like the grammar: `expect_symbol(p, "(") && parse_row_values(...) &&
+  expect_symbol(p, ")")`. The first failure stops the chain and records the error.
+- **String literal concatenation.** `"expected the table name '" TABLE_NAME "'"` is joined
+  by the compiler into one literal, so the message can't drift from the constant.
+- **`%*s` in `printf`.** The width comes from an argument, which is how the caret gets
+  printed under the right column without building a string of spaces by hand.
+
+### Trickiest part
+
+Error positions. The first version only said "Syntax error", which was fine for tests but
+useless for a person typing a long `insert`. Recording the error meant deciding *which*
+token is to blame: for a missing `)` it's the token where the `)` should be (often the end
+of input), but for a bad id it's the id token that was already consumed. That's why there
+are two helpers, `fail` (blame the current token) and `fail_at` (blame a specific one), and
+why only the first error is kept: anything after it is usually a knock-on effect. Tabs were
+a smaller surprise. The column counts characters, but a terminal draws a tab as several
+spaces, so the echoed input prints tabs as single spaces to keep the caret lined up.
+
+### Interview questions
+
+1. **Why split parsing into a tokenizer and a parser?**
+   The tokenizer deals with characters (whitespace, quotes, escapes, two-character
+   operators) and the parser deals with structure. Each stays small, and the parser never
+   has to think about whether `<=` is one symbol or two.
+2. **What is recursive descent, and when does it stop working?**
+   One function per grammar rule, each calling the functions for the rules inside it, and
+   choosing what to do by looking at the next token. It needs a grammar where one token of
+   lookahead decides the branch, and no left recursion (`expr := expr + term` would recurse
+   forever without consuming input). Expression grammars are usually rewritten as loops or
+   handled with precedence climbing.
+3. **Why use an index for `where id > 100` but not for `where username = 'amy'`?**
+   Rows are stored in id order, so the tree can jump straight to id 100 and every later row
+   is in range. Nothing is ordered by username, so every row must be checked. A real
+   database would add a secondary index (another B+tree keyed by username) for that.
+4. **How does SQL put a quote inside a string, and why not use backslashes?**
+   By doubling it: `'it''s'`. That's the SQL standard. Backslash escapes are a MySQL
+   extension, and mixing the two styles is a classic source of injection bugs.
+5. **How would you stop SQL injection in a program that builds queries from user input?**
+   Use prepared statements with bound parameters, so values never go through the parser as
+   text. Escaping by hand is easy to get wrong. This parser is only reached by typed input,
+   but the same idea is why `Statement` holds parsed values rather than strings to re-parse.

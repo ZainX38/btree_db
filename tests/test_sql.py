@@ -7,7 +7,6 @@ import pytest
 
 from conftest import PROMPT
 
-SYNTAX_ERROR = "Syntax error. Could not parse statement."
 INVALID_ID = "ID must be an integer between 0 and 4294967295."
 OPERATORS = {
     "=": operator.eq,
@@ -93,27 +92,41 @@ def test_where_on_id_matches_python_on_a_deep_tree(small_fanout_repl, op):
 
 
 @pytest.mark.parametrize(
-    "sql",
+    "sql, column, message",
     [
-        "select *",
-        "select * from",
-        "select * from orders",
-        "select from users",
-        "select * from users where",
-        "select * from users where id",
-        "select * from users where id ==",
-        "select * from users where name = 1",
-        "select * from users where id = 1 and",
-        "insert into users values (1, a, b",
-        "insert into users values 1, a, b)",
-        "insert into users (1, a, b)",
-        "insert into users values (1 a b)",
-        "insert into users values (1, a)",
-        "insert 1 a b;;",
+        ("select *", 9, "expected FROM"),
+        ("select * from", 14, "expected the table name 'users'"),
+        ("select * from orders", 15, "expected the table name 'users'"),
+        ("select from users", 8, "expected end of statement"),
+        ("select * from users where", 26, "expected a column (id, username or email)"),
+        ("select * from users where id", 29, "expected a comparison (=, !=, <, <=, >, >=)"),
+        ("select * from users where id ==", 31, "expected a value"),
+        ("select * from users where name = 1", 27, "expected a column (id, username or email)"),
+        ("select * from users where id = 1 and", 34, "expected end of statement"),
+        ("insert into users values (1, a, b", 34, "expected ')'"),
+        ("insert into users values 1, a, b)", 26, "expected '('"),
+        ("insert into users (1, a, b)", 19, "expected VALUES"),
+        ("insert into users values (1 a b)", 29, "expected ','"),
+        ("insert into users values (1, a)", 31, "expected ','"),
+        ("insert 1 a b;;", 14, "expected end of statement"),
     ],
 )
-def test_malformed_sql_is_a_syntax_error(repl, sql):
-    assert repl([sql, ".exit"])[0] == PROMPT + SYNTAX_ERROR
+def test_malformed_sql_reports_where_it_failed(repl, sql, column, message):
+    out = repl([sql, ".exit"])
+    assert out[:3] == [
+        PROMPT + f"Syntax error at column {column}: {message}.",
+        "  " + sql,
+        "  " + " " * (column - 1) + "^",
+    ]
+
+
+def test_caret_lines_up_when_the_input_has_tabs(repl):
+    out = repl(["select\t*\tform users", ".exit"])
+    assert out[:3] == [
+        PROMPT + "Syntax error at column 10: expected FROM.",
+        "  select * form users",
+        "           ^",
+    ]
 
 
 def test_bad_id_in_where_or_values(repl):
