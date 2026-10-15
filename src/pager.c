@@ -37,7 +37,7 @@ static void *xcalloc(size_t count, size_t size) {
     return p;
 }
 
-Pager *pager_open(const char *filename, uint32_t num_frames) {
+Pager *pager_open(const char *filename, uint32_t num_frames, bool sync) {
     if (num_frames < PAGER_MIN_FRAMES || num_frames > PAGER_MAX_FRAMES) {
         fprintf(stderr, "Cache must have between %u and %u frames.\n", PAGER_MIN_FRAMES,
                 PAGER_MAX_FRAMES);
@@ -64,7 +64,7 @@ Pager *pager_open(const char *filename, uint32_t num_frames) {
 
     Pager *pager = xcalloc(1, sizeof(Pager));
     pager->fd = fd;
-    pager->wal = wal_open(filename);
+    pager->wal = wal_open(filename, sync);
     pager->committed_wal_size = pager->wal->size;
     pager->num_pages = (uint32_t)(st.st_size / PAGE_SIZE);
     pager->num_frames = num_frames;

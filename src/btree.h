@@ -86,7 +86,10 @@ typedef struct {
     uint32_t root_page_num;
 } Table;
 
-Table *db_open(const char *filename, uint32_t cache_frames);
+/* With `sync` false the WAL is never fsynced: a killed process loses
+ * nothing, because its writes are already in the OS cache, but a power cut
+ * can lose recent commits. */
+Table *db_open(const char *filename, uint32_t cache_frames, bool sync);
 /* Writes every cached page back to disk, then releases the table. */
 void db_close(Table *table);
 

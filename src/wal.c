@@ -33,7 +33,7 @@ static char *wal_filename(const char *db_filename) {
     return name;
 }
 
-Wal *wal_open(const char *db_filename) {
+Wal *wal_open(const char *db_filename, bool sync) {
     char *name = wal_filename(db_filename);
     int fd = open(name, O_RDWR | O_CREAT, WAL_FILE_MODE);
     free(name);
@@ -50,6 +50,7 @@ Wal *wal_open(const char *db_filename) {
     }
     wal->fd = fd;
     wal->size = st.st_size;
+    wal->sync = sync;
     return wal;
 }
 
@@ -88,7 +89,7 @@ void wal_append_commit(Wal *wal) {
 }
 
 void wal_sync(Wal *wal) {
-    if (fsync(wal->fd) < 0) {
+    if (wal->sync && fsync(wal->fd) < 0) {
         die("fsync wal");
     }
 }

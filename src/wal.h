@@ -16,6 +16,7 @@
  * record that was only partly written before a crash fails the check.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
 
@@ -37,13 +38,14 @@ typedef struct {
     int fd;
     off_t size; /* where the next record goes */
     uint64_t records;
+    bool sync; /* false skips fsync, trading power-loss safety for speed */
 } Wal;
 
-Wal *wal_open(const char *db_filename);
+Wal *wal_open(const char *db_filename, bool sync);
 /* Returns the file offset of the page image, so it can be read back later. */
 off_t wal_append_page(Wal *wal, uint32_t page_num, const void *data);
 void wal_append_commit(Wal *wal);
-/* Makes everything appended so far durable. */
+/* Makes everything appended so far durable (unless sync is off). */
 void wal_sync(Wal *wal);
 void wal_close(Wal *wal);
 

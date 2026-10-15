@@ -145,6 +145,7 @@ static void run_statement(const InputBuffer *input, Table *table) {
 typedef struct {
     const char *filename;
     uint32_t cache_frames;
+    bool sync;
 } Options;
 
 /* Accepts only plain decimal digits, so "-1" or "8x" are rejected rather
@@ -161,28 +162,38 @@ static bool parse_frame_count(const char *text, uint32_t *out) {
     return true;
 }
 
-/* Usage: btree_db [--cache-frames N] <database file> */
+/* Usage: btree_db [--cache-frames N] [--no-sync] <database file> */
 static bool parse_options(int argc, char *argv[], Options *options) {
     options->cache_frames = PAGER_DEFAULT_FRAMES;
-    if (argc == 2) {
-        options->filename = argv[1];
-        return true;
+    options->sync = true;
+    int i = 1;
+    for (; i < argc - 1; i++) {
+        if (strcmp(argv[i], "--no-sync") == 0) {
+            options->sync = false;
+        } else if (strcmp(argv[i], "--cache-frames") == 0 && i + 1 < argc - 1) {
+            if (!parse_frame_count(argv[++i], &options->cache_frames)) {
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
-    if (argc == 4 && strcmp(argv[1], "--cache-frames") == 0) {
-        options->filename = argv[3];
-        return parse_frame_count(argv[2], &options->cache_frames);
+    /* The file name is always last, so it can't be mistaken for an option. */
+    if (i != argc - 1) {
+        return false;
     }
-    return false;
+    options->filename = argv[i];
+    return true;
 }
 
 int main(int argc, char *argv[]) {
     Options options;
     if (!parse_options(argc, argv, &options)) {
-        fprintf(stderr, "Usage: %s [--cache-frames N] <database file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [--cache-frames N] [--no-sync] <database file>\n", argv[0]);
         return EXIT_FAILURE;
     }
     InputBuffer input = {0};
-    Table *table = db_open(options.filename, options.cache_frames);
+    Table *table = db_open(options.filename, options.cache_frames, options.sync);
 
     for (;;) {
         print_prompt();

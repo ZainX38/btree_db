@@ -722,13 +722,13 @@ void print_tree(Pager *pager, uint32_t page_num, uint32_t level) {
     print_tree(pager, read_child(pager, page_num, num_keys), level + 1);
 }
 
-Table *db_open(const char *filename, uint32_t cache_frames) {
+Table *db_open(const char *filename, uint32_t cache_frames, bool sync) {
     Table *table = calloc(1, sizeof(Table));
     if (table == NULL) {
         perror("calloc");
         exit(EXIT_FAILURE);
     }
-    table->pager = pager_open(filename, cache_frames);
+    table->pager = pager_open(filename, cache_frames, sync);
     table->root_page_num = ROOT_PAGE_NUM;
 
     if (table->pager->num_pages == 0) {

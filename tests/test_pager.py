@@ -2,6 +2,8 @@ import os
 import struct
 import subprocess
 
+import pytest
+
 from conftest import TIMEOUT_SECONDS
 
 PAGE_SIZE = 4096
@@ -70,3 +72,36 @@ def test_read_only_session_writes_nothing(repl, db_path):
     repl(["select", ".btree", ".validate", ".exit"])
     assert db_path.stat().st_mtime_ns == 1_000_000_000
     assert db_path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--no-sync"],
+        ["--no-sync", "--cache-frames", "8"],
+        ["--cache-frames", "8", "--no-sync"],
+    ],
+)
+def test_options_can_come_in_any_order(db_bin, db_path, options):
+    proc = subprocess.run([db_bin, *options, str(db_path)], input="insert 1 a b\nselect\n",
+                          capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+    assert proc.returncode == 0
+    assert "(1, a, b)" in proc.stdout
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--sync", "DB"],
+        ["--cache-frames", "DB"],
+        ["--cache-frames", "8"],
+        ["--no-sync", "--no-sync-please", "DB"],
+        ["DB", "--no-sync"],
+    ],
+)
+def test_bad_options_are_rejected(db_bin, db_path, args):
+    args = [str(db_path) if arg == "DB" else arg for arg in args]
+    proc = subprocess.run([db_bin, *args], input="", capture_output=True, text=True,
+                          timeout=TIMEOUT_SECONDS)
+    assert proc.returncode != 0
+    assert "Usage:" in proc.stderr
