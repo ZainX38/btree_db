@@ -3,6 +3,7 @@
 import os
 import pathlib
 import subprocess
+import threading
 
 import pytest
 
@@ -19,6 +20,7 @@ PAGE_SIZE_BYTES = 4096
 LEAF_NODE_MAX_CELLS = 13
 # A cache far smaller than the test databases, so pages are evicted constantly.
 TINY_CACHE_FRAMES = 8
+VALID_TREE = "Tree is valid."
 
 
 def find_binary(env_var, default):
@@ -28,6 +30,11 @@ def find_binary(env_var, default):
     return str(path)
 
 
+def binary_args(binary, db_path, cache_frames, sync):
+    args = [binary] + ([] if cache_frames is None else ["--cache-frames", str(cache_frames)])
+    return args + ([] if sync else ["--no-sync"]) + [str(db_path)]
+
+
 def make_runner(binary, db_path, cache_frames=None, sync=False):
     """Return run(commands) -> stdout lines.
 
@@ -35,12 +42,11 @@ def make_runner(binary, db_path, cache_frames=None, sync=False):
     in one test simulates a restart. Sync is off by default: an fsync per insert
     makes the suite about 15 times slower, and a test process never loses power.
     """
-    args = [binary] + ([] if cache_frames is None else ["--cache-frames", str(cache_frames)])
-    args += [] if sync else ["--no-sync"]
+    args = binary_args(binary, db_path, cache_frames, sync)
 
     def run(commands):
         proc = subprocess.run(
-            args + [str(db_path)],
+            args,
             input="".join(c + "\n" for c in commands),
             capture_output=True,
             text=True,
@@ -52,6 +58,48 @@ def make_runner(binary, db_path, cache_frames=None, sync=False):
         return proc.stdout.split("\n")
 
     return run
+
+
+def make_killer(binary, db_path, cache_frames=None, sync=False):
+    """Return run_then_kill(commands) -> stdout lines.
+
+    Like make_runner, but the process never exits cleanly: once every command
+    has been answered it gets SIGKILL, so nothing runs at shutdown. A trailing
+    .validate marks the end, since its answer comes after all the others.
+    """
+    args = binary_args(binary, db_path, cache_frames, sync)
+
+    def run_then_kill(commands):
+        proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        # Writing from another thread, because a long script fills the stdin
+        # pipe while the REPL is blocked on a full stdout pipe we aren't reading.
+        script = "".join(c + "\n" for c in list(commands) + [".validate"])
+
+        def feed():
+            try:
+                proc.stdin.write(script)
+                proc.stdin.flush()
+            except BrokenPipeError:
+                pass  # killed before reading it all, which is fine
+
+        threading.Thread(target=feed, daemon=True).start()
+        watchdog = threading.Timer(TIMEOUT_SECONDS, proc.kill)
+        watchdog.start()
+        lines = []
+        for line in proc.stdout:
+            if line.endswith(VALID_TREE + "\n"):
+                break
+            lines.append(line.rstrip("\n"))
+        else:
+            pytest.fail("REPL exited or timed out before finishing the script")
+        proc.kill()
+        proc.wait()
+        watchdog.cancel()
+        assert proc.stderr.read() == ""
+        return lines
+
+    return run_then_kill
 
 
 @pytest.fixture

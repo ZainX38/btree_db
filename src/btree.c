@@ -744,7 +744,8 @@ Table *db_open(const char *filename, uint32_t cache_frames, bool sync) {
 }
 
 void db_close(Table *table) {
-    pager_flush_all(table->pager);
+    pager_commit(table->pager);
+    pager_checkpoint(table->pager);
     pager_close(table->pager);
     free(table);
 }

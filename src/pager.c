@@ -87,6 +87,34 @@ static Frame *find_frame(Pager *pager, uint32_t page_num) {
     return NULL;
 }
 
+/* The latest WAL image of a page, or 0 if the database file is up to date.
+ * 0 can't be a real image offset because every record starts with a header. */
+static off_t logged_offset(const Pager *pager, uint32_t page_num) {
+    return page_num < pager->num_logged ? pager->logged[page_num] : 0;
+}
+
+static void set_logged_offset(Pager *pager, uint32_t page_num, off_t offset) {
+    if (page_num >= pager->num_logged) {
+        /* Doubling keeps growth cheap; new slots start at 0 ("not logged"). */
+        uint32_t new_len = page_num + 1 > 2 * pager->num_logged ? page_num + 1
+                                                                : 2 * pager->num_logged;
+        off_t *grown = realloc(pager->logged, new_len * sizeof(off_t));
+        if (grown == NULL) {
+            die("realloc");
+        }
+        memset(grown + pager->num_logged, 0, (new_len - pager->num_logged) * sizeof(off_t));
+        pager->logged = grown;
+        pager->num_logged = new_len;
+    }
+    pager->logged[page_num] = offset;
+}
+
+static void log_frame(Pager *pager, Frame *frame) {
+    off_t offset = wal_append_page(pager->wal, frame->page_num, frame->data);
+    set_logged_offset(pager, frame->page_num, offset);
+    frame->dirty = false;
+}
+
 static void write_page(Pager *pager, uint32_t page_num, const void *data) {
     ssize_t written = pwrite(pager->fd, data, PAGE_SIZE, page_offset(page_num));
     if (written != (ssize_t)PAGE_SIZE) {
@@ -94,10 +122,16 @@ static void write_page(Pager *pager, uint32_t page_num, const void *data) {
     }
 }
 
-/* Fills a buffer from disk. A page past the end of the file has never been
+/* Fills a buffer from disk, preferring the WAL, which holds every change
+ * since the last checkpoint. A page past the end of the file has never been
  * written, so it reads as zeros; anything between 0 and a full page is a
  * torn write. */
 static void load_page(Pager *pager, uint32_t page_num, void *data) {
+    off_t offset = logged_offset(pager, page_num);
+    if (offset != 0) {
+        wal_read_page(pager->wal, offset, data);
+        return;
+    }
     ssize_t got = pread(pager->fd, data, PAGE_SIZE, page_offset(page_num));
     if (got == 0) {
         memset(data, 0, PAGE_SIZE);
@@ -123,18 +157,14 @@ static Frame *claim_frame(Pager *pager) {
         fprintf(stderr, "Pager bug: all %u cache frames are pinned.\n", pager->num_frames);
         abort();
     }
-    /* The log must hold every version a commit could need, including pages
-     * that leave the cache halfway through a statement. */
-    if (victim->unlogged) {
-        wal_append_page(pager->wal, victim->page_num, victim->data);
-        victim->unlogged = false;
-    }
+    /* An evicted page goes to the log, never to the database file: the
+     * statement that changed it may not commit, and the database file must
+     * only ever hold committed pages. */
     if (victim->dirty) {
-        write_page(pager, victim->page_num, victim->data);
+        log_frame(pager, victim);
     }
     pager->evictions++;
     victim->page_num = PAGER_NO_PAGE;
-    victim->dirty = false;
     return victim;
 }
 
@@ -183,22 +213,17 @@ void pager_mark_dirty(Pager *pager, uint32_t page_num) {
         pin_bug("page marked dirty while not pinned", page_num);
     }
     frame->dirty = true;
-    frame->unlogged = true;
 }
 
 void pager_commit(Pager *pager) {
-    bool changed = false;
     for (uint32_t i = 0; i < pager->num_frames; i++) {
-        Frame *frame = &pager->frames[i];
-        if (frame->unlogged) {
-            wal_append_page(pager->wal, frame->page_num, frame->data);
-            frame->unlogged = false;
-            changed = true;
+        if (pager->frames[i].dirty) {
+            log_frame(pager, &pager->frames[i]);
         }
     }
-    /* Evicted pages may already be in the log even if no cached page is
-     * still unlogged, so compare against the log's size instead. */
-    if (changed || pager->wal->size > pager->committed_wal_size) {
+    /* Evicted pages count too, so compare the log's size rather than looking
+     * only at the frames still in the cache. */
+    if (pager->wal->size > pager->committed_wal_size) {
         wal_append_commit(pager->wal);
         wal_sync(pager->wal);
         pager->committed_wal_size = pager->wal->size;
@@ -213,14 +238,35 @@ uint32_t pager_get_unused_page_num(const Pager *pager) {
     return pager->num_pages;
 }
 
-void pager_flush_all(Pager *pager) {
-    for (uint32_t i = 0; i < pager->num_frames; i++) {
-        Frame *frame = &pager->frames[i];
-        if (frame->page_num != PAGER_NO_PAGE && frame->dirty) {
-            write_page(pager, frame->page_num, frame->data);
-            frame->dirty = false;
+static void sync_database(Pager *pager) {
+    if (pager->wal->sync && fsync(pager->fd) < 0) {
+        die("fsync");
+    }
+}
+
+void pager_checkpoint(Pager *pager) {
+    /* Copying uncommitted pages would make a half-done statement permanent. */
+    if (pager->wal->size > pager->committed_wal_size) {
+        fprintf(stderr, "Pager bug: checkpoint with uncommitted pages in the log.\n");
+        abort();
+    }
+    if (pager->wal->size == 0) {
+        return;
+    }
+    void *buffer = xcalloc(1, PAGE_SIZE);
+    for (uint32_t page_num = 0; page_num < pager->num_logged; page_num++) {
+        if (pager->logged[page_num] != 0) {
+            wal_read_page(pager->wal, pager->logged[page_num], buffer);
+            write_page(pager, page_num, buffer);
         }
     }
+    free(buffer);
+    /* The log is the only other copy of these pages, so it may only be
+     * emptied once they are durable in the database file. */
+    sync_database(pager);
+    wal_reset(pager->wal);
+    pager->committed_wal_size = 0;
+    memset(pager->logged, 0, pager->num_logged * sizeof(off_t));
 }
 
 void pager_close(Pager *pager) {
@@ -231,6 +277,7 @@ void pager_close(Pager *pager) {
         free(pager->frames[i].data);
     }
     free(pager->frames);
+    free(pager->logged);
     wal_close(pager->wal);
     if (close(pager->fd) < 0) {
         die("close");

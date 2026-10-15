@@ -90,7 +90,8 @@ typedef struct {
  * nothing, because its writes are already in the OS cache, but a power cut
  * can lose recent commits. */
 Table *db_open(const char *filename, uint32_t cache_frames, bool sync);
-/* Writes every cached page back to disk, then releases the table. */
+/* Commits anything pending, checkpoints the WAL into the database file,
+ * then releases the table. */
 void db_close(Table *table);
 
 NodeType get_node_type(const void *node);
