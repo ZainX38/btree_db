@@ -195,6 +195,7 @@ void wal_reset(Wal *wal) {
         die("ftruncate wal");
     }
     wal->size = 0;
+    wal->records = 0;
     wal_sync(wal);
 }
 

@@ -230,6 +230,9 @@ void pager_commit(Pager *pager) {
         wal_sync(pager->wal);
         pager->committed_wal_size = pager->wal->size;
     }
+    if (pager->wal->records >= PAGER_CHECKPOINT_RECORDS) {
+        pager_checkpoint(pager);
+    }
 }
 
 uint32_t pager_get_unused_page_num(const Pager *pager) {
@@ -268,6 +271,7 @@ void pager_checkpoint(Pager *pager) {
     sync_database(pager);
     wal_reset(pager->wal);
     pager->committed_wal_size = 0;
+    pager->checkpoints++;
     memset(pager->logged, 0, pager->num_logged * sizeof(off_t));
 }
 

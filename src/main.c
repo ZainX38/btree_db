@@ -61,6 +61,8 @@ static void print_cache_stats(const Pager *pager) {
     printf("misses: %" PRIu64 "\n", pager->misses);
     printf("evictions: %" PRIu64 "\n", pager->evictions);
     printf("peak pinned: %u\n", pager->peak_pinned_pages);
+    printf("wal records: %" PRIu64 "\n", pager->wal->records);
+    printf("checkpoints: %" PRIu64 "\n", pager->checkpoints);
 }
 
 static MetaCommandResult do_meta_command(const InputBuffer *input, Table *table) {
