@@ -63,7 +63,7 @@ typedef struct {
     uint32_t peak_pinned_pages;
 } Pager;
 
-Pager *pager_open(const char *filename, uint32_t num_frames);
+Pager *pager_open(const char *filename, uint32_t num_frames, bool sync);
 /* Returns the page's buffer and pins it. */
 void *pager_get_page(Pager *pager, uint32_t page_num);
 void pager_unpin(Pager *pager, uint32_t page_num);

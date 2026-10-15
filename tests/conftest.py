@@ -28,13 +28,15 @@ def find_binary(env_var, default):
     return str(path)
 
 
-def make_runner(binary, db_path, cache_frames=None):
+def make_runner(binary, db_path, cache_frames=None, sync=False):
     """Return run(commands) -> stdout lines.
 
     Each call is a fresh process on the same database file, so calling it twice
-    in one test simulates a restart.
+    in one test simulates a restart. Sync is off by default: an fsync per insert
+    makes the suite about 15 times slower, and a test process never loses power.
     """
     args = [binary] + ([] if cache_frames is None else ["--cache-frames", str(cache_frames)])
+    args += [] if sync else ["--no-sync"]
 
     def run(commands):
         proc = subprocess.run(
