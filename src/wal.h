@@ -45,8 +45,13 @@ Wal *wal_open(const char *db_filename, bool sync);
 /* Returns the file offset of the page image, so it can be read back later. */
 off_t wal_append_page(Wal *wal, uint32_t page_num, const void *data);
 void wal_append_commit(Wal *wal);
+/* Reads back a page image from the offset wal_append_page returned. */
+void wal_read_page(const Wal *wal, off_t offset, void *data);
 /* Makes everything appended so far durable (unless sync is off). */
 void wal_sync(Wal *wal);
+/* Empties the log. Only safe once every page in it has reached the
+ * database file and been fsynced there. */
+void wal_reset(Wal *wal);
 void wal_close(Wal *wal);
 
 #endif

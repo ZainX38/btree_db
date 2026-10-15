@@ -7,14 +7,15 @@
  * decides when bytes actually move between that buffer and disk.
  *
  * Pages live in a fixed number of frames. When every frame is in use, the
- * least recently used unpinned frame is evicted (written back first only if
- * it is dirty), so the database can be far bigger than the cache.
+ * least recently used unpinned frame is evicted, so the database can be far
+ * bigger than the cache. Changed pages are written to the WAL, never straight
+ * to the database file; a checkpoint copies them across later.
  *
  * Usage rules, which every caller follows:
  *  - pager_get_page() pins the page. The pointer stays valid until the
  *    matching pager_unpin(); after that the page may be evicted.
  *  - Anyone who changes a page calls pager_mark_dirty() while it's pinned,
- *    so the change gets written back. Clean pages are never written.
+ *    so the change gets logged. Clean pages are never written.
  *  - Nothing may still be pinned when the pager is closed.
  */
 
@@ -36,9 +37,7 @@
 typedef struct {
     uint32_t page_num; /* PAGER_NO_PAGE while the frame is empty */
     uint32_t pin_count;
-    bool dirty;
-    /* Changed since its last image went into the WAL. */
-    bool unlogged;
+    bool dirty; /* changed since its last image went into the WAL */
     uint64_t last_used; /* pager clock value at the most recent get_page */
     void *data;
 } Frame;
@@ -48,6 +47,10 @@ typedef struct {
     Wal *wal;
     /* WAL size at the last commit record; anything past it is uncommitted. */
     off_t committed_wal_size;
+    /* For each page, the WAL offset of its latest image (0 if none), so a
+     * page evicted since the last checkpoint is read back from the log. */
+    off_t *logged;
+    uint32_t num_logged;
     uint32_t num_pages; /* pages that exist on disk or have been handed out */
     uint32_t num_frames;
     Frame *frames;
@@ -75,8 +78,9 @@ uint32_t pager_get_unused_page_num(const Pager *pager);
 /* Logs every page changed since the last commit, then a commit record, and
  * waits for the log to reach disk. Does nothing if nothing changed. */
 void pager_commit(Pager *pager);
-/* Writes every dirty page back to the file. */
-void pager_flush_all(Pager *pager);
+/* Copies the latest committed image of every logged page into the database
+ * file, fsyncs it and empties the WAL. Call only right after a commit. */
+void pager_checkpoint(Pager *pager);
 /* Frees the cache and closes the file; does not flush. */
 void pager_close(Pager *pager);
 

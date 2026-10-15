@@ -88,6 +88,23 @@ void wal_append_commit(Wal *wal) {
     append_record(wal, WAL_RECORD_COMMIT, 0, NULL, 0);
 }
 
+void wal_read_page(const Wal *wal, off_t offset, void *data) {
+    if (pread(wal->fd, data, PAGE_SIZE, offset) != (ssize_t)PAGE_SIZE) {
+        die("pread wal");
+    }
+}
+
+void wal_reset(Wal *wal) {
+    if (wal->size == 0) {
+        return;
+    }
+    if (ftruncate(wal->fd, 0) < 0) {
+        die("ftruncate wal");
+    }
+    wal->size = 0;
+    wal_sync(wal);
+}
+
 void wal_sync(Wal *wal) {
     if (wal->sync && fsync(wal->fd) < 0) {
         die("fsync wal");
