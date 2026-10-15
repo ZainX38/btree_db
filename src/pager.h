@@ -33,6 +33,10 @@
 /* Marks an empty frame. Also caps page numbers, so the file can hold up to
  * UINT32_MAX - 1 pages (about 16TB). */
 #define PAGER_NO_PAGE UINT32_MAX
+/* A commit checkpoints once the log holds this many records (about 4MB of
+ * page images), so the log and the time to replay it after a crash stay
+ * bounded however long a session runs. */
+#define PAGER_CHECKPOINT_RECORDS 1000u
 
 typedef struct {
     uint32_t page_num; /* PAGER_NO_PAGE while the frame is empty */
@@ -64,6 +68,7 @@ typedef struct {
     uint64_t evictions;
     uint32_t pinned_pages; /* frames with pin_count > 0 right now */
     uint32_t peak_pinned_pages;
+    uint64_t checkpoints;
 } Pager;
 
 Pager *pager_open(const char *filename, uint32_t num_frames, bool sync);
@@ -76,7 +81,8 @@ void pager_mark_dirty(Pager *pager, uint32_t page_num);
  * file. The page only counts as used once it is requested with get_page. */
 uint32_t pager_get_unused_page_num(const Pager *pager);
 /* Logs every page changed since the last commit, then a commit record, and
- * waits for the log to reach disk. Does nothing if nothing changed. */
+ * waits for the log to reach disk. Does nothing if nothing changed.
+ * Checkpoints afterwards if the log has grown past PAGER_CHECKPOINT_RECORDS. */
 void pager_commit(Pager *pager);
 /* Copies the latest committed image of every logged page into the database
  * file, fsyncs it and empties the WAL. Call only right after a commit. */

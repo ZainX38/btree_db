@@ -9,11 +9,15 @@ import zlib
 
 import pytest
 
-from conftest import PAGE_SIZE_BYTES, TINY_CACHE_FRAMES, make_killer
+from conftest import PAGE_SIZE_BYTES, PROMPT, TINY_CACHE_FRAMES, make_killer, select_rows
 
 HEADER = struct.Struct("<III")  # type, page_num, crc32
 RECORD_PAGE = 1
 RECORD_COMMIT = 2
+CHECKPOINT_RECORDS = 1000
+# One statement can log many pages before its commit (a split chain), so the
+# log may run a little past the threshold before the checkpoint happens.
+MAX_RECORDS_PER_STATEMENT = 50
 
 
 def insert(i):
@@ -86,10 +90,11 @@ def test_database_file_only_changes_at_a_checkpoint(killed_repl, repl, db_path):
 
 def test_pages_evicted_mid_statement_are_logged(db_bin, db_path):
     killed_tiny_cache_repl = make_killer(db_bin, db_path, TINY_CACHE_FRAMES)
-    out = killed_tiny_cache_repl([insert(i) for i in range(400)] + [".stats"])
+    # Few enough rows that the log never reaches a checkpoint.
+    out = killed_tiny_cache_repl([insert(i) for i in range(150)] + [".stats"])
     pages = next(int(line.split(": ")[1]) for line in out if "pages: " in line)
     records = read_wal(db_path)
-    assert commits(records) == 401
+    assert commits(records) == 151
     assert {page for kind, page, _ in records if kind == RECORD_PAGE} == set(range(pages))
     # Nothing was checkpointed, so the database file is still empty.
     assert db_path.stat().st_size == 0
@@ -99,3 +104,18 @@ def test_clean_exit_checkpoints_and_empties_the_log(repl, db_path):
     repl([insert(i) for i in range(100)] + [".exit"])
     assert wal_path(db_path).stat().st_size == 0
     assert db_path.stat().st_size > PAGE_SIZE_BYTES
+
+
+def stats(out):
+    return {k: int(v) for k, _, v in (line.rpartition(": ") for line in out) if v.isdigit()}
+
+
+def test_long_sessions_checkpoint_so_the_log_stays_small(killed_repl, repl, db_path):
+    out = killed_repl([insert(i) for i in range(3000)] + [".stats"])
+    counters = stats([line.removeprefix(PROMPT) for line in out])
+    assert counters["checkpoints"] >= 2
+    assert counters["wal records"] == len(read_wal(db_path))
+    max_size = (CHECKPOINT_RECORDS + MAX_RECORDS_PER_STATEMENT) * (HEADER.size + PAGE_SIZE_BYTES)
+    assert wal_path(db_path).stat().st_size < max_size
+    # Rows from before and after the last checkpoint all survive the kill.
+    assert select_rows(repl) == [f"({i}, u{i}, e{i})" for i in range(3000)]

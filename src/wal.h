@@ -37,7 +37,7 @@ typedef enum { WAL_RECORD_PAGE = 1, WAL_RECORD_COMMIT = 2 } WalRecordType;
 typedef struct {
     int fd;
     off_t size; /* where the next record goes */
-    uint64_t records;
+    uint64_t records; /* records in the log now; reset empties it */
     bool sync; /* false skips fsync, trading power-loss safety for speed */
 } Wal;
 
