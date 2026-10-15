@@ -37,6 +37,8 @@ static void *xcalloc(size_t count, size_t size) {
     return p;
 }
 
+static void recover(Pager *pager);
+
 Pager *pager_open(const char *filename, uint32_t num_frames, bool sync) {
     if (num_frames < PAGER_MIN_FRAMES || num_frames > PAGER_MAX_FRAMES) {
         fprintf(stderr, "Cache must have between %u and %u frames.\n", PAGER_MIN_FRAMES,
@@ -65,7 +67,6 @@ Pager *pager_open(const char *filename, uint32_t num_frames, bool sync) {
     Pager *pager = xcalloc(1, sizeof(Pager));
     pager->fd = fd;
     pager->wal = wal_open(filename, sync);
-    pager->committed_wal_size = pager->wal->size;
     pager->num_pages = (uint32_t)(st.st_size / PAGE_SIZE);
     pager->num_frames = num_frames;
     pager->frames = xcalloc(num_frames, sizeof(Frame));
@@ -73,6 +74,7 @@ Pager *pager_open(const char *filename, uint32_t num_frames, bool sync) {
         pager->frames[i].page_num = PAGER_NO_PAGE;
         pager->frames[i].data = xcalloc(1, PAGE_SIZE);
     }
+    recover(pager);
     return pager;
 }
 
@@ -267,6 +269,31 @@ void pager_checkpoint(Pager *pager) {
     wal_reset(pager->wal);
     pager->committed_wal_size = 0;
     memset(pager->logged, 0, pager->num_logged * sizeof(off_t));
+}
+
+static void remember_committed_page(void *context, uint32_t page_num, off_t offset) {
+    Pager *pager = context;
+    /* The CRC rules out torn writes, not a log from somewhere else. */
+    if (page_num >= PAGER_NO_PAGE) {
+        fprintf(stderr, "WAL is corrupt: page number %u is out of range.\n", page_num);
+        exit(EXIT_FAILURE);
+    }
+    set_logged_offset(pager, page_num, offset);
+    /* A page that only ever existed in the log still counts as allocated. */
+    if (page_num >= pager->num_pages) {
+        pager->num_pages = page_num + 1;
+    }
+}
+
+/* A log left over from a crash holds statements that were acknowledged but
+ * never checkpointed. Checkpointing them straight away also empties the log,
+ * torn tail and all. That matters: records after a bad one may still pass
+ * their CRC (left from an older, longer log), and appending after them would
+ * let a later replay read them as part of a new statement. */
+static void recover(Pager *pager) {
+    wal_replay(pager->wal, remember_committed_page, pager);
+    pager->committed_wal_size = pager->wal->size;
+    pager_checkpoint(pager);
 }
 
 void pager_close(Pager *pager) {

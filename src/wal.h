@@ -45,6 +45,15 @@ Wal *wal_open(const char *db_filename, bool sync);
 /* Returns the file offset of the page image, so it can be read back later. */
 off_t wal_append_page(Wal *wal, uint32_t page_num, const void *data);
 void wal_append_commit(Wal *wal);
+/* Called once for every page image that belongs to a committed statement, in
+ * log order, so a later image of the same page replaces an earlier one. */
+typedef void (*WalPageVisitor)(void *context, uint32_t page_num, off_t offset);
+
+/* Walks the log from the start until a record is truncated or fails its CRC,
+ * and visits every page image that is followed by a commit record. Anything
+ * after the last good commit was never acknowledged, so ignoring it loses
+ * nothing a user was promised. */
+void wal_replay(Wal *wal, WalPageVisitor visit, void *context);
 /* Reads back a page image from the offset wal_append_page returned. */
 void wal_read_page(const Wal *wal, off_t offset, void *data);
 /* Makes everything appended so far durable (unless sync is off). */
