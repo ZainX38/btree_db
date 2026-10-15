@@ -24,20 +24,28 @@ def wal_path(db_path):
     return db_path.with_name(db_path.name + ".wal")
 
 
+def record_spans(db_path):
+    """Return [(type, page_num, start, end)], asserting every record is intact."""
+    data = wal_path(db_path).read_bytes()
+    spans, pos = [], 0
+    while pos < len(data):
+        kind, page_num, crc = HEADER.unpack_from(data, pos)
+        size = HEADER.size + (PAGE_SIZE_BYTES if kind == RECORD_PAGE else 0)
+        payload = data[pos + HEADER.size : pos + size]
+        assert kind in (RECORD_PAGE, RECORD_COMMIT)
+        assert zlib.crc32(payload, zlib.crc32(struct.pack("<II", kind, page_num))) == crc
+        spans.append((kind, page_num, pos, pos + size))
+        pos += size
+    return spans
+
+
 def read_wal(db_path):
     """Return [(type, page_num, payload)], asserting every record is intact."""
     data = wal_path(db_path).read_bytes()
-    records, pos = [], 0
-    while pos < len(data):
-        kind, page_num, crc = HEADER.unpack_from(data, pos)
-        pos += HEADER.size
-        size = PAGE_SIZE_BYTES if kind == RECORD_PAGE else 0
-        payload = data[pos : pos + size]
-        pos += size
-        assert kind in (RECORD_PAGE, RECORD_COMMIT)
-        assert zlib.crc32(payload, zlib.crc32(struct.pack("<II", kind, page_num))) == crc
-        records.append((kind, page_num, payload))
-    return records
+    return [
+        (kind, page_num, data[start + HEADER.size : end])
+        for kind, page_num, start, end in record_spans(db_path)
+    ]
 
 
 def commits(records):
