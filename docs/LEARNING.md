@@ -447,3 +447,87 @@ spaces, so the echoed input prints tabs as single spaces to keep the caret lined
    Use prepared statements with bound parameters, so values never go through the parser as
    text. Escaping by hand is easy to get wrong. This parser is only reached by typed input,
    but the same idea is why `Statement` holds parsed values rather than strings to re-parse.
+
+## Phase 8: WAL, recovery and crash tests
+
+### What was built
+
+- A write-ahead log next to the database (`<db>.wal`). Each record is a 12-byte header
+  (type, page number, CRC-32) followed by a full 4KB page image, or nothing for a commit
+  record. After every statement, the pager appends every page the statement changed and
+  then a commit record, and calls `fsync`. Only then does the REPL print `Executed.`.
+- Changed pages go to the log, never straight to the database file. That includes pages
+  evicted from the cache halfway through a statement. A per-page index remembers where each
+  page's latest image is, and reads check the log first.
+- Checkpoints copy the latest image of every logged page into the database file, `fsync`
+  it, and then empty the log. They run on a clean exit, at startup, and whenever the log
+  reaches 1,000 records.
+- Recovery at startup reads records until one is cut short or fails its CRC, applies only
+  the pages that come before a commit record, and checkpoints straight away.
+- `--no-sync` skips `fsync`. The bulk tests use it, because an `fsync` per insert made the
+  suite 15 times slower.
+- Three kinds of crash test. A random SIGKILL while inserts stream in. Hand-damaged logs:
+  torn tails, flipped bits, uncommitted pages. And `BTREE_DB_CRASH_AFTER=N`, which makes the
+  debug build `_exit()` just before its Nth write, so a test can crash at every write a
+  script makes, one by one. That last test found a real bug: a log holding only a torn
+  record made the checkpoint call `memset(NULL, 0, 0)`.
+
+### Key C concepts
+
+- **`pwrite`, `ftruncate` and `fsync`.** `pwrite` writes at an offset without moving a
+  shared file position. `write` returning doesn't mean the data is on disk: it is in the
+  OS page cache until `fsync` returns. That's the gap a WAL is designed around.
+- **CRC-32 with a lookup table.** The checksum is polynomial division over bits. A
+  256-entry table precomputes the result for every byte value, so each byte costs one
+  lookup and a shift. Using the zlib polynomial lets Python's `zlib.crc32` check the same
+  records in tests.
+- **Function pointers as callbacks.** `wal_replay` takes a `WalPageVisitor` and a
+  `void *context`, so the WAL module can hand pages to the pager without knowing what a
+  pager is. This is C's version of passing a closure.
+- **`_exit` vs `exit`.** `exit` runs `atexit` handlers and flushes stdio buffers. `_exit`
+  stops the process immediately, which is what a crash test needs to imitate a kill.
+- **`#ifdef NDEBUG` for test-only code.** The crash points compile to an empty function in
+  the release build, so the environment variable can't do anything outside tests.
+- **`memset(NULL, 0, 0)` is undefined.** The C standard says pointer arguments to the
+  `mem*` functions must be valid even when the length is zero. UBSan reports it, and
+  compilers are allowed to optimise as if the pointer can't be NULL.
+
+### Trickiest part
+
+Choosing what goes into the log. Logging each statement ("insert 5 bob b@x") and
+replaying it looked simpler, but with a small cache, pages are evicted halfway through a
+split. If an evicted page goes straight into the database file and the process then dies,
+the file holds half a split, and replaying a statement on top of a broken tree can't fix
+it. Logging whole page images and never writing the database file outside a checkpoint
+means the file only ever holds committed state. This is how SQLite's WAL mode works.
+
+The other surprise was how hard crash bugs are to hit with random kills. A deliberately
+planted bug (writing evicted pages to the database file) survived 40 rounds of random
+SIGKILL, because the window where it matters is a few writes inside a rare split. Crashing
+at every single write in turn, on a tree where the next insert splits all the way to the
+root, catches it every time.
+
+### Interview questions
+
+1. **What does "write-ahead" mean?**
+   A change must be durable in the log before the database file is changed. If the
+   process dies at any point, the log holds everything needed to redo the committed
+   changes, and the database file never holds anything uncommitted.
+2. **Why is `fsync` needed, and what does `--no-sync` give up?**
+   `write` only reaches the OS page cache, so a power cut can lose it. A killed process
+   loses nothing, because the kernel still writes the cache out. `--no-sync` stays safe
+   against crashes of the program but not against power loss, the same trade-off as
+   SQLite's `synchronous=OFF`.
+3. **How does recovery tell a complete record from a torn one?**
+   Each record carries a CRC over its header and payload, and a page record has a fixed
+   size. A record that is cut short, has an unknown type or fails its CRC ends the replay.
+   Pages are only applied once a commit record follows them, so a statement is replayed
+   completely or not at all.
+4. **Why checkpoint, and why truncate the log only after `fsync` on the database file?**
+   Without checkpoints the log grows forever and recovery gets slower. The log is the only
+   durable copy of the pages until the database file has been `fsync`ed, so emptying it
+   any earlier could lose committed data in a power cut.
+5. **How would you test crash safety without pulling the plug?**
+   Inject faults. Stop the process just before its Nth write for every N, and check after
+   each restart that every acknowledged statement survived and nothing half-done did. Random
+   kills are a good extra, but they rarely land inside the narrow windows where bugs live.
