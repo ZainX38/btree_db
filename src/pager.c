@@ -8,6 +8,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "crashpoint.h"
+
 /* Read and write owner only: the database may hold personal data. */
 #define DB_FILE_MODE (S_IRUSR | S_IWUSR)
 
@@ -118,6 +120,7 @@ static void log_frame(Pager *pager, Frame *frame) {
 }
 
 static void write_page(Pager *pager, uint32_t page_num, const void *data) {
+    crash_point();
     ssize_t written = pwrite(pager->fd, data, PAGE_SIZE, page_offset(page_num));
     if (written != (ssize_t)PAGE_SIZE) {
         die("pwrite");
