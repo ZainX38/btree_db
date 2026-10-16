@@ -98,3 +98,11 @@ def test_recovery_with_a_tiny_cache_and_a_deep_tree(db_path, small_fanout_repl):
     keys = list(range(0, 3000, 7))
     make_killer(binary, db_path, TINY_CACHE_FRAMES)([insert(k) for k in reversed(keys)])
     assert_recovered(small_fanout_repl, keys)
+
+
+@pytest.mark.parametrize("junk", [b"\x01", b"\x01\x00\x00\x00\x00\x00", b"\xff" * 100])
+def test_log_with_only_a_torn_record_is_discarded(repl, db_path, junk):
+    repl([insert(i) for i in range(ROWS)] + [".exit"])
+    wal_path(db_path).write_bytes(junk)
+    assert_recovered(repl, range(ROWS))
+    assert wal_path(db_path).stat().st_size == 0

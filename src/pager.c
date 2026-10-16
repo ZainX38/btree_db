@@ -272,7 +272,11 @@ void pager_checkpoint(Pager *pager) {
     wal_reset(pager->wal);
     pager->committed_wal_size = 0;
     pager->checkpoints++;
-    memset(pager->logged, 0, pager->num_logged * sizeof(off_t));
+    /* A log holding only a torn record has nothing logged yet, and memset on
+     * the still-NULL array is undefined even for zero bytes. */
+    if (pager->logged != NULL) {
+        memset(pager->logged, 0, pager->num_logged * sizeof(off_t));
+    }
 }
 
 static void remember_committed_page(void *context, uint32_t page_num, off_t offset) {
