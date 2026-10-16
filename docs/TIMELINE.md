@@ -60,6 +60,14 @@ Hours per phase are unchanged; only what goes into some commits moved.
   ones. Commit 22 moves the old grammar onto the tokenizer so it can be tested on its own,
   and keeping the short forms afterwards means the earlier tests didn't have to be rewritten.
   Commit 23 also makes `where id ...` seek through the tree instead of scanning every leaf.
+- **Phase 8** was split into smaller commits (25-25c, 27b, 28b-28d) and two were swapped.
+  Replay is only correct if the database file never holds an uncommitted page, and with a
+  small cache, pages are evicted halfway through a split. So keeping changed pages in the
+  WAL until a checkpoint (commit 26, which checkpoints on clean exit) had to come before
+  replay (commit 27). Commit 25c adds `--no-sync`, because an fsync per insert made the
+  test suite 15 times slower. The random SIGKILL test (commit 28) never hit the narrow
+  windows inside a split, so commit 28c adds crash points that stop the process at each
+  disk write in turn. They found a real bug, fixed in commit 28b.
 
 ## Commit schedule (all times +01:00)
 
@@ -89,10 +97,16 @@ Hours per phase are unchanged; only what goes into some commits moved.
 | 22 | Tue 2026-10-13 18:47 | 7 | 3.5 | feat: tokenizer with case-insensitive keywords and quoted strings |
 | 23 | Wed 2026-10-14 00:29 | 7 | 4.5 | feat: recursive descent parser for insert and select with where |
 | 24 | Wed 2026-10-14 01:52 | 7 | 2 | Parse errors now show the column where the problem is |
-| 25 | Wed 2026-10-14 23:46 | 8 | 4 | feat: crc32 and WAL record format with append and fsync |
-| 26 | Thu 2026-10-15 02:13 | 8 | 5 | feat: replay WAL on startup until a bad CRC or truncated record |
-| 27 | Thu 2026-10-15 18:38 | 8 | 3 | feat: checkpoint on clean exit and every N records |
-| 28 | Fri 2026-10-16 01:44 | 8 | 6 | Added crash test that kills the REPL mid-write and checks acknowledged rows |
+| 25 | Wed 2026-10-14 23:46 | 8 | 2 | feat: crc32 and WAL record format with append and fsync |
+| 25b | Thu 2026-10-15 00:58 | 8 | 1.5 | feat: log changed pages and a commit record to the WAL after every statement |
+| 25c | Thu 2026-10-15 01:21 | 8 | 0.5 | feat: --no-sync option that skips fsync, used by the bulk tests |
+| 26 | Thu 2026-10-15 02:13 | 8 | 3.5 | feat: keep changed pages in the WAL and checkpoint them into the db file on clean exit |
+| 27 | Thu 2026-10-15 18:38 | 8 | 3.5 | feat: replay WAL on startup until a bad CRC or truncated record |
+| 27b | Thu 2026-10-15 20:07 | 8 | 1 | feat: checkpoint every 1000 WAL records so the log stays small |
+| 28 | Fri 2026-10-16 01:44 | 8 | 2.5 | Added crash test that kills the REPL mid-write and checks acknowledged rows |
+| 28b | Fri 2026-10-16 02:09 | 8 | 0.5 | fix: recover from a log that holds only a torn record without passing NULL to memset |
+| 28c | Fri 2026-10-16 02:31 | 8 | 2.5 | Added crash points so tests can stop the REPL at every disk write |
+| 28d | Fri 2026-10-16 02:50 | 8 | 0.5 | docs: learning notes for the WAL and recovery phase |
 | 29 | Fri 2026-10-16 02:58 | 9 | 2 | perf: benchmark script for sequential and random inserts and lookups |
 | 30 | Sat 2026-10-17 13:26 | 9 | 4 | docs: README with architecture, page layouts, WAL and benchmarks |
 | 31 | Sat 2026-10-17 15:14 | 9 | 2 | docs: final timeline totals and cleanup |
