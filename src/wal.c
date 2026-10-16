@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "crashpoint.h"
 #include "crc32.h"
 #include "pager.h"
 
@@ -57,6 +58,7 @@ Wal *wal_open(const char *db_filename, bool sync) {
 }
 
 static void write_at(Wal *wal, const void *data, size_t length, off_t offset) {
+    crash_point();
     if (pwrite(wal->fd, data, length, offset) != (ssize_t)length) {
         die("pwrite wal");
     }
@@ -191,6 +193,7 @@ void wal_reset(Wal *wal) {
     if (wal->size == 0) {
         return;
     }
+    crash_point();
     if (ftruncate(wal->fd, 0) < 0) {
         die("ftruncate wal");
     }
