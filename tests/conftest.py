@@ -24,7 +24,7 @@ VALID_TREE = "Tree is valid."
 
 
 def find_binary(env_var, default):
-    # The env var lets the benchmark or a CI job point tests at another build.
+    # The env var lets a CI job point tests at another build.
     path = pathlib.Path(os.environ.get(env_var, default))
     assert path.exists(), f"binary not built: {path} (run make test)"
     return str(path)
