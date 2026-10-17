@@ -260,14 +260,7 @@ and with `fsync` turned on each one waits for the disk. Use `--rows`, `--lookups
   machines with different endianness.
 - Each statement is its own transaction; there is no `BEGIN`/`COMMIT`.
 
-## Further reading
-
-- [`docs/LEARNING.md`](docs/LEARNING.md) has notes for each stage of the build: what was
-  built, the C concepts behind it, the hardest part and practice interview questions.
-- [`docs/TIMELINE.md`](docs/TIMELINE.md) has the build plan, the hour estimates and what
-  the commit dates mean.
-
-This project draws on these resources:
+I used these references to guide me:
 
 - [cstack/db_tutorial](https://github.com/cstack/db_tutorial), the "Let's Build a Simple
   Database" tutorial, which the REPL, row format and page layouts start from.
