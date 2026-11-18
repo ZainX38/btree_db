@@ -65,3 +65,6 @@ __pycache__/
 # Database files created by tests and manual runs
 *.db
 *.db.wal
+
+# Local development schedule
+docs/TIMELINE.md
